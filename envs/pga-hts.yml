@@ -1,0 +1,8 @@
+name: pga-hts
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - htslib=1.19.1
+  - samtools=1.19.2
+  - bcftools=1.19

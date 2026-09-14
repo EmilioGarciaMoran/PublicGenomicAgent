@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "publicgenomicagent"
+version = "0.0.1"
+description = "Agente genómico conversacional, quirúrgico y virtualizado"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "typer>=0.12",
+    "rich>=13",
+    "pydantic>=2.6",
+    "pyyaml>=6",
+]
+
+[project.scripts]
+pga = "publicgenomicagent.cli.main:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]

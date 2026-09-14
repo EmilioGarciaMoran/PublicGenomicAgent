@@ -1,0 +1,11 @@
+* text=auto eol=lf
+*.bam   binary
+*.bai   binary
+*.cram  binary
+*.crai  binary
+*.vcf.gz binary
+*.bcf   binary
+*.png   binary
+*.jpg   binary
+*.pdf   binary
+docs/**      linguist-documentation

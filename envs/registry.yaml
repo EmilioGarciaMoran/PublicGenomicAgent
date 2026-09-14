@@ -1,0 +1,25 @@
+envs:
+  pga-core:
+    manifest: envs/pga-core.yml
+    description: "Agente, CLI, orquestación, estado"
+    installs_self: true
+  pga-hts:
+    manifest: envs/pga-hts.yml
+    description: "htslib (samtools, bcftools, tabix, bgzip)"
+
+tools:
+  python:
+    env: pga-core
+    binary: python
+    version_flag: "--version"
+    min_version: "3.11"
+  samtools:
+    env: pga-hts
+    binary: samtools
+    version_flag: "--version"
+    min_version: "1.19"
+  bcftools:
+    env: pga-hts
+    binary: bcftools
+    version_flag: "--version"
+    min_version: "1.19"
