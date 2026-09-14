@@ -9,3 +9,5 @@ dependencies:
     - rich
     - pydantic>=2
     - pyyaml
+    - pytest
+    - pytest-cov

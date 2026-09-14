@@ -20,3 +20,9 @@ pga = "publicgenomicagent.cli.main:app"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: tests que requieren entornos micromamba reales",
+]
+testpaths = ["tests"]

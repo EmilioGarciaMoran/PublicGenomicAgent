@@ -8,28 +8,27 @@ from rich.table import Table
 
 from publicgenomicagent.env.bootstrap import bootstrap_env
 from publicgenomicagent.env.micromamba import env_exists, find_micromamba
-from publicgenomicagent.env.paths import ENVS_DIR, PGA_ROOT
+from publicgenomicagent.env.paths import ENVS_DIR, PGA_ROOT, registry_path
 from publicgenomicagent.env.registry import load_registry
+from publicgenomicagent.env.runtime import ToolRuntime
 from publicgenomicagent.env.verify import verify_all
 
 app = typer.Typer(help="PublicGenomicAgent — agente genómico conversacional")
 env_app = typer.Typer(help="Gestión de entornos virtualizados")
+tool_app = typer.Typer(help="Ejecutar herramientas bioinformáticas")
 app.add_typer(env_app, name="env")
+app.add_typer(tool_app, name="tool")
 
 console = Console()
 
 
-def _registry_path() -> Path:
-    # En dev: el repo está en la cwd; en prod: empaquetado en el wheel
-    local = Path.cwd() / "envs" / "registry.yaml"
-    if local.exists():
-        return local
-    raise FileNotFoundError("envs/registry.yaml no encontrado en la cwd")
+def _registry():
+    return load_registry(registry_path())
 
 
 @env_app.command("list")
 def env_list() -> None:
-    reg = load_registry(_registry_path())
+    reg = _registry()
     table = Table(title="Entornos declarados")
     table.add_column("Entorno")
     table.add_column("Estado")
@@ -47,7 +46,7 @@ def env_bootstrap(
     name: str = typer.Argument(..., help="Nombre del entorno a crear"),
     force: bool = typer.Option(False, "--force", "-f", help="Reconstruir aunque exista"),
 ) -> None:
-    reg = load_registry(_registry_path())
+    reg = _registry()
     console.print(f"[dim]micromamba: {find_micromamba()}[/dim]")
     msg = bootstrap_env(reg, name, force=force)
     console.print(msg)
@@ -55,7 +54,7 @@ def env_bootstrap(
 
 @env_app.command("verify")
 def env_verify() -> None:
-    reg = load_registry(_registry_path())
+    reg = _registry()
     results = verify_all(reg)
     table = Table(title="Verificación de entornos y herramientas")
     table.add_column("Entorno")
@@ -66,3 +65,22 @@ def env_verify() -> None:
         color = {"ok": "green", "stale_manifest": "yellow"}.get(r.status, "red")
         table.add_row(r.env, r.tool, f"[{color}]{r.status}[/{color}]", r.detail)
     console.print(table)
+
+
+@tool_app.command("fetch-roi")
+def tool_fetch_roi(
+    bam: str = typer.Option(..., "--bam", "-b", help="BAM de entrada (indexado)"),
+    region: str = typer.Option(..., "--region", "-r", help="Región chr:start-end"),
+    out: str = typer.Option(..., "--out", "-o", help="BAM de salida"),
+) -> None:
+    from publicgenomicagent.tools.base import FetchROIInput
+    from publicgenomicagent.tools.fetch_roi import fetch_roi
+
+    reg = _registry()
+    runtime = ToolRuntime(reg)
+    inp = FetchROIInput(bam_path=Path(bam), region=region, output_bam=Path(out))
+    result = fetch_roi(runtime, inp)
+    console.print(
+        f"[green]OK[/green] {result.output_bam} "
+        f"({result.bytes_written} bytes, índice: {result.output_bai.name})"
+    )

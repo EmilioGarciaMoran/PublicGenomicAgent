@@ -4,11 +4,8 @@ from pathlib import Path
 
 from .manifests import read_lock, sha256_of_file, write_lock
 from .micromamba import create_env, env_exists, install_package_editable
+from .paths import repo_root
 from .registry import Registry
-
-
-def repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
 
 
 def bootstrap_env(registry: Registry, name: str, force: bool = False) -> str:
@@ -28,7 +25,6 @@ def bootstrap_env(registry: Registry, name: str, force: bool = False) -> str:
     if exists and lock and lock.get("manifest_hash") == current_hash and not force:
         return f"[=] {name} ya está actualizado ({current_hash[:12]})"
 
-    # Caso: entorno existe pero no hay lock → solo registrar e instalar pkg si aplica.
     if exists and lock is None and not force:
         if spec.installs_self:
             install_package_editable(name, repo_root())
@@ -39,7 +35,6 @@ def bootstrap_env(registry: Registry, name: str, force: bool = False) -> str:
         })
         return f"[+] {name} registrado (sin lock previo) — hash {current_hash[:12]}"
 
-    # Caso: crear/reconstruir entorno desde manifiesto, luego instalar pkg si aplica.
     create_env(manifest, name)
     if spec.installs_self:
         install_package_editable(name, repo_root())
