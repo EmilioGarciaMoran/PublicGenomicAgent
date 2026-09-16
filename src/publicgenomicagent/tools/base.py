@@ -58,3 +58,23 @@ class QCBamOutput(ToolOutput):
     header: QCHeader
     counts: dict[str, object] | None = None
     stats: dict[str, object] | None = None
+
+
+# --- call_variants -----------------------------------------------------
+
+class CallVariantsInput(BaseModel):
+    bam_path: Path                          # sub-BAM ya cortado por fetch_roi
+    reference_fasta: Path                   # hg38.fa o referencia sintética
+    output_vcf: Path                        # <out>.vcf.gz
+    region: str | None = None               # opcional; si None, todo el BAM
+    samples: list[str] = []                 # opcional; multi-muestra (trío)
+    min_qual: int = 20
+    min_dp: int = 5
+    ploidy: int = 2
+
+
+class CallVariantsOutput(ToolOutput):
+    output_vcf: Path
+    output_tbi: Path
+    variants_total: int
+    variants_passing: int

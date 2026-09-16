@@ -143,3 +143,31 @@ def tool_qc(
         console.print_json(data=result.counts)
 
     raise typer.Exit(code=0 if result.passed else 1)
+
+
+@tool_app.command("call-variants")
+def tool_call_variants(
+    bam: str = typer.Option(..., "--bam", "-b", help="Sub-BAM de entrada"),
+    reference: str = typer.Option(..., "--reference", "-f", help="FASTA de referencia"),
+    out: str = typer.Option(..., "--out", "-o", help="VCF.gz de salida"),
+    region: str = typer.Option(None, "--region", "-r", help="Región chr:start-end (opcional)"),
+    min_qual: int = typer.Option(20, "--min-qual", help="QUAL mínimo"),
+    min_dp: int = typer.Option(5, "--min-dp", help="DP mínimo por muestra"),
+) -> None:
+    from publicgenomicagent.tools.base import CallVariantsInput
+    from publicgenomicagent.tools.call_variants import call_variants
+
+    inp = CallVariantsInput(
+        bam_path=Path(bam),
+        reference_fasta=Path(reference),
+        output_vcf=Path(out),
+        region=region,
+        min_qual=min_qual,
+        min_dp=min_dp,
+    )
+    result = call_variants(_runtime(), inp)
+    console.print(
+        f"[green]OK[/green] {result.output_vcf} "
+        f"({result.variants_passing} variantes passing de "
+        f"{result.variants_total}, índice: {result.output_tbi.name})"
+    )
