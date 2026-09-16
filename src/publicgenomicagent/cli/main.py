@@ -26,6 +26,12 @@ def _registry():
     return load_registry(registry_path())
 
 
+def _runtime():
+    return ToolRuntime(_registry())
+
+
+# ----------------------------- env -------------------------------------
+
 @env_app.command("list")
 def env_list() -> None:
     reg = _registry()
@@ -67,6 +73,8 @@ def env_verify() -> None:
     console.print(table)
 
 
+# ----------------------------- tool ------------------------------------
+
 @tool_app.command("fetch-roi")
 def tool_fetch_roi(
     bam: str = typer.Option(..., "--bam", "-b", help="BAM de entrada (indexado)"),
@@ -76,11 +84,62 @@ def tool_fetch_roi(
     from publicgenomicagent.tools.base import FetchROIInput
     from publicgenomicagent.tools.fetch_roi import fetch_roi
 
-    reg = _registry()
-    runtime = ToolRuntime(reg)
     inp = FetchROIInput(bam_path=Path(bam), region=region, output_bam=Path(out))
-    result = fetch_roi(runtime, inp)
+    result = fetch_roi(_runtime(), inp)
     console.print(
         f"[green]OK[/green] {result.output_bam} "
         f"({result.bytes_written} bytes, índice: {result.output_bai.name})"
     )
+
+
+@tool_app.command("qc")
+def tool_qc(
+    bam: str = typer.Option(..., "--bam", "-b", help="BAM a inspeccionar"),
+    level: str = typer.Option("structural", "--level", "-l",
+                              help="structural | counts | deep"),
+    expected_ref: str = typer.Option(None, "--expected-ref",
+                                     help=".fai de referencia esperada (opcional)"),
+    expected_sample: str = typer.Option(None, "--expected-sample",
+                                        help="SM esperado en el header (opcional)"),
+) -> None:
+    from publicgenomicagent.tools.base import QCBamInput, QCLevel
+    from publicgenomicagent.tools.qc import qc_bam
+
+    try:
+        qc_level = QCLevel(level)
+    except ValueError:
+        console.print(f"[red]Nivel inválido:[/red] {level}. Usa structural|counts|deep")
+        raise typer.Exit(code=2)
+
+    inp = QCBamInput(
+        bam_path=Path(bam),
+        level=qc_level,
+        expected_reference_fai=Path(expected_ref) if expected_ref else None,
+        expected_sample=expected_sample,
+    )
+    result = qc_bam(_runtime(), inp)
+
+    # Cabecera resumen
+    color = "green" if result.passed else "red"
+    console.print(f"[{color}]{result.message}[/{color}]")
+
+    # Header
+    h = result.header
+    console.print(f"[bold]Header[/bold]  SO={h.sort_order}  "
+                  f"refs={len(h.references)}  RG={len(h.read_groups)}  SM={h.samples}")
+
+    # Issues y warnings
+    if result.issues:
+        console.print("\n[red]Issues[/red]")
+        for i in result.issues:
+            console.print(f"  [red]✗[/red] {i}")
+    if result.warnings:
+        console.print("\n[yellow]Warnings[/yellow]")
+        for w in result.warnings:
+            console.print(f"  [yellow]![/yellow] {w}")
+
+    if result.counts:
+        console.print("\n[bold]Counts[/bold]")
+        console.print_json(data=result.counts)
+
+    raise typer.Exit(code=0 if result.passed else 1)
