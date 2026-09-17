@@ -78,3 +78,23 @@ class CallVariantsOutput(ToolOutput):
     output_tbi: Path
     variants_total: int
     variants_passing: int
+
+
+# --- compare_vcfs ------------------------------------------------------
+
+class CompareVCFsInput(BaseModel):
+    baseline_vcf: Path
+    candidate_vcf: Path
+    output_delta_vcf: Path
+    output_report: Path | None = None
+    output_tsv: Path | None = None
+    sample: str | None = None       # si None, toma el primer sample de cada VCF
+    ground_truth_vcf: Path | None = None  # opcional
+
+
+class CompareVCFsOutput(ToolOutput):
+    delta_vcf: Path
+    report_json: Path | None = None
+    tsv: Path | None = None
+    counts: dict[str, int] = {}
+    metrics: dict[str, object] = {}

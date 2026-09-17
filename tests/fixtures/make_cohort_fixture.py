@@ -8,6 +8,18 @@ from __future__ import annotations
 import json, random, subprocess, sys
 from pathlib import Path
 
+# NOTA: este script requiere el entorno pga-core.
+# Ejecutar con:  ~/.pga/envs/pga-core/bin/python make_cohort_fixture.py <outdir>
+# NO usar el python3 del sistema.
+try:
+    import publicgenomicagent  # noqa: F401
+except ImportError:
+    raise SystemExit(
+        "ERROR: este script requiere el entorno pga-core.\n"
+        "Ejecuta con:\n"
+        "  ~/.pga/envs/pga-core/bin/python " + __file__
+    )
+
 sys.path.insert(0, str(Path(__file__).parent))
 from genotype_simulator import simulate_snv_genotypes, simulate_sv_genotypes
 from pedigree_model import build_standard_pedigree

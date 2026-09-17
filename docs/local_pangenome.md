@@ -475,3 +475,37 @@ compare_vcfs explota la información de fase:
 - No elimina el riesgo de haplotipo quimérico cuando se genera un
   consenso único desde la cohorte; solo lo mitiga cuando se generan
   los dos consensos haplotípicos.
+
+---
+
+## 14. Cohorte acumulativa local (recordatorio, pendiente)
+
+**Idea pendiente de desarrollo**: en pangenómica, el límite entre muestra
+y referencia se difumina. Cada muestra procesada (trío, familia, paciente
+individual) podría incorporarse como referencia futura, de forma
+acumulativa.
+
+Consecuencias si se implementa:
+
+- El lab construye un cohort VCF propio que crece con cada caso.
+- Ese cohort es más específico que gnomAD MID para la población estudiada.
+- `local_pangenome` puede apuntar a `--cohort local` en lugar de (o
+  además de) `--cohort gnomad-mid`.
+- El activo del lab crece con cada caso; es el diferenciador real frente
+  a soluciones genéricas.
+
+Requisitos antes de implementar (no triviales):
+
+- Consentimiento explícito para uso secundario.
+- Separación de metadatos identificativos y secuencia.
+- Mecanismo de retirada (borrar muestra del cohort si se retira consentimiento).
+- Versionado del cohort.
+- Evitar circularidad en tests (muestra que entra y luego se usa como referencia).
+
+API tentativa (futuro):
+
+    pga cohort add --sample <vcf.gz> --consent <file>
+    pga cohort list
+    pga cohort export --region <roi> --out cohort_roi.vcf.gz
+
+Detalles a desarrollar en sesión aparte.

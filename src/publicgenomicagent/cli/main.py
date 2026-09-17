@@ -119,20 +119,17 @@ def tool_qc(
     )
     result = qc_bam(_runtime(), inp)
 
-    # Cabecera resumen
     color = "green" if result.passed else "red"
     console.print(f"[{color}]{result.message}[/{color}]")
 
-    # Header
     h = result.header
     console.print(f"[bold]Header[/bold]  SO={h.sort_order}  "
                   f"refs={len(h.references)}  RG={len(h.read_groups)}  SM={h.samples}")
 
-    # Issues y warnings
     if result.issues:
         console.print("\n[red]Issues[/red]")
         for i in result.issues:
-            console.print(f"  [red]✗[/red] {i}")
+            console.print(f"  [red]x[/red] {i}")
     if result.warnings:
         console.print("\n[yellow]Warnings[/yellow]")
         for w in result.warnings:
@@ -171,3 +168,43 @@ def tool_call_variants(
         f"({result.variants_passing} variantes passing de "
         f"{result.variants_total}, índice: {result.output_tbi.name})"
     )
+
+
+@tool_app.command("compare-vcfs")
+def tool_compare_vcfs(
+    baseline: str = typer.Option(..., "--baseline", "-a",
+                                 help="VCF baseline (p.ej. GRCh38)"),
+    candidate: str = typer.Option(..., "--candidate", "-c",
+                                  help="VCF candidato (p.ej. enriquecido)"),
+    out: str = typer.Option(..., "--out", "-o", help="delta.vcf.gz"),
+    report: str = typer.Option(None, "--report",
+                               help="delta_report.json (opcional)"),
+    tsv: str = typer.Option(None, "--tsv", help="delta.tsv (opcional)"),
+    sample: str = typer.Option(None, "--sample", "-s",
+                               help="sample name (por defecto, el primero)"),
+    ground_truth: str = typer.Option(None, "--ground-truth",
+                                     help="VCF ground truth (opcional)"),
+) -> None:
+    from publicgenomicagent.tools.base import CompareVCFsInput
+    from publicgenomicagent.tools.compare_vcfs import compare_vcfs
+
+    inp = CompareVCFsInput(
+        baseline_vcf=Path(baseline),
+        candidate_vcf=Path(candidate),
+        output_delta_vcf=Path(out),
+        output_report=Path(report) if report else None,
+        output_tsv=Path(tsv) if tsv else None,
+        sample=sample,
+        ground_truth_vcf=Path(ground_truth) if ground_truth else None,
+    )
+    result = compare_vcfs(inp)
+    console.print(f"[green]OK[/green] {result.delta_vcf}")
+    for k, v in result.counts.items():
+        console.print(f"  {k}: {v}")
+    if result.metrics.get("delta_sensitivity") is not None:
+        console.print(
+            f"[bold]delta sensitivity:[/bold] "
+            f"{result.metrics['delta_sensitivity']:+.4f}   "
+            f"[bold]delta precision:[/bold] "
+            f"{result.metrics['delta_precision']:+.4f}"
+        )
