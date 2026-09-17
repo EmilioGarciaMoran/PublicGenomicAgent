@@ -42,9 +42,14 @@ contra ese consenso en lugar de contra GRCh38.
 ## 3. Entradas
 
 - **Referencia base**: `hg38.fa` (o el FASTA del ROI descargado de UCSC).
-- **Cohort VCF**: frecuencias poblacionales del Middle East para el ROI.
-  - Puede venir de gnomAD MID, Al Mena, EGP, o cualquier cohort anotado.
-  - Debe tener `INFO/AF` (o `INFO/AF_MID`) con frecuencia poblacional.
+- **Cohort VCF**: frecuencias poblacionales de la población de interés
+  para el ROI.
+  - Puede venir de gnomAD MID, Al Mena, EGP, KFSHRC, o cualquier cohort
+    anotado con `INFO/AF`.
+  - gnomAD MID es un **placeholder**: agrupa muestras MENA heterogéneas
+    y no representa específicamente poblaciones saudíes consanguíneas.
+    La prioridad estratégica es poder alimentar el sistema con cohortes
+    locales reales.
   - Opcionalmente contiene genotipos de individuos (para otros usos).
 - **Región del ROI**: `chr:start-end`.
 - **Umbral de AF**: por defecto `0.01` (1%). Parametrizable con `--min-af`.
@@ -105,6 +110,27 @@ Nota sobre SVs: los SVs simbólicos (DEL, INS, DUP, INV) rompen
 bcftools consensus por su REF=N y por afectar coordenadas. Se tratan
 aparte en el futuro sv_detector. El consenso enriquecido maneja
 solo SNVs e indels.
+
+Nota sobre LD y haplotipos: forzar todos los ALT a 1/1 rompe el
+desequilibrio de ligamiento. Dos variantes comunes en la cohorte que
+nunca co-ocurren en el mismo haplotipo real aparecerán juntas en el
+consenso, produciendo una secuencia que ningún individuo de la
+población porta. Esto puede generar sobre-mapeo, fragmentación de
+lecturas, y falsos positivos nuevos.
+
+El consenso lineal es un proxy consciente, no una representación fiel
+de la diversidad poblacional. Es la primera aproximación, barata y
+rápida, suficiente para la mayoría de casos.
+
+Mitigaciones:
+- Phasing por trío cuando hay padre + madre + hijo identificados por
+  SM y los tres pasan QC estructural. Es phasing por transmisión
+  (Mendel), no estadístico: exacto donde hay información, no inferido.
+  Se aplica automáticamente; el usuario puede desactivarlo con
+  --no-trio-phasing. Detalles en la sección 13.
+- Modo grafo (sección 6) cuando el LD importe clínicamente.
+- El diff VCF registra cada variante incorporada, permitiendo auditar
+  el resultado a posteriori.
 
 ---
 
@@ -351,8 +377,101 @@ Tests de integración previstos:
 - test_compare_vcfs_categorizes_correctly: clasificación
   recovered / lost / consistent / discordant sobre VCFs sintéticos.
 
-- test_pga_recovers_known_variant (benchmarking de oro):
+- test_pga_recovers_known_variant (test de humo / prueba de mecanismo):
     1. Generar BAM sintético de C2 con la variante 2-110008979-A-T.
     2. Calling contra GRCh38 -> variante NO detectada o genotipo erróneo.
     3. Calling contra enriquecido -> variante SÍ detectada, genotipo correcto.
     4. compare_vcfs -> assert recovered >= 1.
+
+  Este test verifica que el pipeline funciona mecánicamente. No es
+  validación clínica. La validación clínica requiere cohortes reales
+  con desenlaces conocidos, comparación contra un método independiente
+  (por ejemplo NanoRanger en un subset), y cálculo de sensibilidad,
+  especificidad y valores predictivos.
+
+---
+
+## 13. Phasing por trío
+
+El sistema soporta phasing por transmisión (Mendel) cuando hay un
+trío completo: padre, madre, hijo, identificados por SM en los
+BAMs, y todos ellos pasan QC estructural.
+
+### 13.1 Dos tipos de phasing
+
+Phasing estadístico (Beagle, SHAPEIT, Eagle):
+
+- Infiere fase a partir de desequilibrio de ligamiento en una cohorte.
+- No sabe qué alelo vino de qué progenitor.
+- Tasa de error por variante: ~1-5%.
+- Produce 0|1 con confianza probabilística.
+
+Phasing por transmisión (trio phasing):
+
+- Usa trío completo para determinar la fase por deducción lógica.
+- Sabe qué alelo vino del padre y cuál de la madre.
+- Tasa de error: cero, salvo errores de genotipado que se detectan
+  por incoherencia mendeliana.
+- Casos ambiguos: cuando ambos padres son 0/1 en la misma variante
+  y no hay abuelos ni más hijos que resuelvan la fase.
+
+El sistema usa phasing por transmisión, no estadístico. Ningún caller
+clínico estándar fasea por defecto, y el phasing estadístico en
+cohortes pequeñas introduce errores propios.
+
+### 13.2 Cuándo se activa
+
+- Hay al menos un hijo identificable por SM con padre y madre
+  también identificables.
+- Los tres BAMs pasan QC estructural (integridad, índice, orden).
+- Los tres BAMs tienen SM distintos y únicos.
+- El ROI es común a los tres.
+
+Si se cumplen las condiciones, el phasing por trío se aplica
+automáticamente. El usuario puede desactivarlo con --no-trio-phasing.
+
+### 13.3 Producto
+
+Cuando se activa, se emiten:
+
+- phase_sets.vcf.gz: VCF del ROI con GT faseado (0|1 en lugar de 0/1).
+- hap_paternal.fa y hap_maternal.fa: dos consensos separados, uno
+  por haplotipo del hijo.
+- transmission_report.json: qué variantes del hijo vienen de cada
+  progenitor, qué variantes son de novo, qué variantes quedan ambiguas.
+
+### 13.4 Uso en local_pangenome
+
+Cuando hay fase, local_pangenome puede generar:
+
+1. Consenso lineal común (default, sin fase). Válido para la
+   mayoría de casos.
+2. Dos consensos haplotípicos, uno por haplotipo del hijo. Útiles
+   para:
+   - Detectar variantes en cis vs trans (heterocigoto compuesto
+     real vs falsa alarma).
+   - Reducir falsos positivos en regiones con LD fuerte.
+   - Confirmar variantes de novo sin ambigüedad.
+
+El agente decide cuál usar según el caso. Por defecto: consenso común.
+Si el caso requiere desambiguar cis/trans, usa los haplotípicos.
+
+### 13.5 Integración con compare_vcfs
+
+compare_vcfs explota la información de fase:
+
+- Variantes recovered que están en trans son muy significativas:
+  indican heterocigoto compuesto candidato.
+- Variantes recovered que están en cis son un único alelo:
+  menos interesantes clínicamente.
+- Variantes discordant con fase distinta entre los dos callings
+  son señal de reference bias severo.
+
+### 13.6 Limitaciones
+
+- No resuelve el caso "ambos padres 0/1" sin abuelos o más hijos.
+- Requiere que el trío esté completo y con buena cobertura.
+- No sustituye al phasing poblacional en regiones sin cobertura.
+- No elimina el riesgo de haplotipo quimérico cuando se genera un
+  consenso único desde la cohorte; solo lo mitiga cuando se generan
+  los dos consensos haplotípicos.
