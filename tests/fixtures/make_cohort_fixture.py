@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Genera fixture de cohorte: VCF bgzip + tabix + .fam + ground truth."""
+"""Genera fixture de cohorte: VCF bgzip + tabix + .fam + ground truth.
+
+Coordenadas LOCALES al ROI (1-based, dentro del FASTA). El contig se
+renombra a `chr2_roi` para evitar confusión con chr2 genómico.
+"""
 from __future__ import annotations
 import json, random, subprocess, sys
 from pathlib import Path
@@ -13,8 +17,16 @@ from publicgenomicagent.knowledge.gnomad import fetch_region, mid_freq
 ROI_CHROM = "2"
 ROI_START = 110_000_000
 ROI_END = 110_025_000
+ROI_LEN = ROI_END - ROI_START
 SEED = 42
+CONTIG = f"chr{ROI_CHROM}_roi"
+
 BCFTOOLS = str(Path("~/.pga/envs/pga-hts/bin/bcftools").expanduser())
+
+
+def to_local(genomic_pos: int) -> int:
+    """Convierte posición genómica 1-based a posición local 1-based del FASTA."""
+    return genomic_pos - ROI_START
 
 
 def load_mid_variants():
@@ -31,27 +43,33 @@ def load_mid_variants():
 def write_plain(path, pedigree, snv_genos, sv_genos, snv_vars, sv_cat):
     samples = pedigree.order_for_vcf()
     records = []
+
     for v in snv_vars:
+        pos_local = to_local(v["pos"])
         gts = [f"{snv_genos[i][v['variant_id']][0]}/{snv_genos[i][v['variant_id']][1]}" for i in samples]
         line = "\t".join([
-            f"chr{ROI_CHROM}", str(v["pos"]), v["variant_id"],
+            CONTIG, str(pos_local), v["variant_id"],
             v["ref"], v["alt"], ".", "PASS", ".", "GT",
         ] + gts)
-        records.append((v["pos"], line))
+        records.append((pos_local, line))
+
     for sv in sv_cat:
+        pos_local = to_local(sv.pos)
+        end_local = to_local(sv.end)
         gts = [f"{sv_genos[i][sv.id][0]}/{sv_genos[i][sv.id][1]}" for i in samples]
-        info = f"SVTYPE={sv.svtype};END={sv.end};SVLEN={sv.length}"
+        info = f"SVTYPE={sv.svtype};END={end_local};SVLEN={sv.length}"
         line = "\t".join([
-            f"chr{ROI_CHROM}", str(sv.pos), sv.id,
+            CONTIG, str(pos_local), sv.id,
             "N", f"<{sv.svtype}>", ".", "PASS", info, "GT",
         ] + gts)
-        records.append((sv.pos, line))
+        records.append((pos_local, line))
+
     records.sort(key=lambda x: x[0])
 
     with path.open("w") as f:
         f.write("##fileformat=VCFv4.2\n")
         f.write("##source=PublicGenomicAgent-fixture\n")
-        f.write(f"##contig=<ID=chr{ROI_CHROM},length={ROI_END+1000}>\n")
+        f.write(f"##contig=<ID={CONTIG},length={ROI_LEN}>\n")
         f.write('##INFO=<ID=SVTYPE,Number=1,Type=String,Description="SV type">\n')
         f.write('##INFO=<ID=END,Number=1,Type=Integer,Description="End">\n')
         f.write('##INFO=<ID=SVLEN,Number=1,Type=Integer,Description="Length">\n')
@@ -84,8 +102,14 @@ def write_fam(path, pedigree):
 def write_expected(path, snv_vars, sv_cat, sv_genos):
     payload = {
         "roi": {"chrom": ROI_CHROM, "start": ROI_START, "end": ROI_END},
+        "contig": CONTIG,
         "snv_count": len(snv_vars),
-        "sv_catalog": [{"id": s.id, "svtype": s.svtype, "pos": s.pos, "length": s.length} for s in sv_cat],
+        "sv_catalog": [
+            {"id": s.id, "svtype": s.svtype,
+             "pos_genomic": s.pos, "pos_local": to_local(s.pos),
+             "length": s.length}
+            for s in sv_cat
+        ],
         "expected_findings": {
             "SV002_de_novo_C2": {
                 "C2": list(sv_genos["C2"]["SV002"]),
@@ -126,6 +150,7 @@ def main():
 
     print(f"OK: {vcf}")
     print(f"SNVs: {len(snvs)}  SVs: {len(cat)}  samples: {len(ped.individuals)}")
+    print(f"Contig local: {CONTIG} (posiciones 1..{ROI_LEN})")
 
 
 if __name__ == "__main__":
