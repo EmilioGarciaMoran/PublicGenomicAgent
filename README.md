@@ -7,6 +7,20 @@ regiones relevantes (ROIs) y devuelve un VCF delta con variantes
 candidatas priorizadas. Optimizado para hardware modesto: portátiles,
 discos externos, sin clúster.
 
+## Qué es esto
+
+PublicGenomicAgent no es un pipeline. Un pipeline produce ficheros;
+este sistema produce decisiones.
+
+Entrada: un BAM ya alineado + una consulta clínica (fenotipo,
+familia, sospecha diagnóstica).
+
+Salida: una decisión cuantificada sobre variantes candidatas,
+con estadística mendeliana, pangenomización local, y trazabilidad
+completa del proceso.
+
+El VCF es el lenguaje intermedio. La decisión es el producto.
+
 ## Enfoque: clínico, no genómico
 
 PublicGenomicAgent no es un pipeline genómico más. Es una herramienta
