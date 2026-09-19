@@ -98,3 +98,24 @@ class CompareVCFsOutput(ToolOutput):
     tsv: Path | None = None
     counts: dict[str, int] = {}
     metrics: dict[str, object] = {}
+
+
+# --- local_pangenome ---------------------------------------------------
+
+class LocalPangenomeInput(BaseModel):
+    cohort_vcf: Path
+    reference_fasta: Path
+    region: str                     # "chr:start-end"
+    output_dir: Path
+    min_af: float = 0.01
+    af_info_field: str = "AF"       # campo INFO con la frecuencia
+    contig_name: str | None = None  # si el FASTA usa otro nombre de contig
+
+
+class LocalPangenomeOutput(ToolOutput):
+    enriched_fasta: Path
+    enriched_fai: Path
+    diff_vcf: Path
+    diff_tbi: Path
+    report_json: Path
+    counts: dict[str, int] = {}

@@ -59,9 +59,11 @@ def write_plain(path, pedigree, snv_genos, sv_genos, snv_vars, sv_cat):
     for v in snv_vars:
         pos_local = to_local(v["pos"])
         gts = [f"{snv_genos[i][v['variant_id']][0]}/{snv_genos[i][v['variant_id']][1]}" for i in samples]
+        af = v.get("_af_mid", 0.0)
+        info = f"AF_MID={af:.6f}"
         line = "\t".join([
             CONTIG, str(pos_local), v["variant_id"],
-            v["ref"], v["alt"], ".", "PASS", ".", "GT",
+            v["ref"], v["alt"], ".", "PASS", info, "GT",
         ] + gts)
         records.append((pos_local, line))
 
@@ -89,6 +91,7 @@ def write_plain(path, pedigree, snv_genos, sv_genos, snv_vars, sv_cat):
         f.write('##ALT=<ID=INS,Description="Insertion">\n')
         f.write('##ALT=<ID=DUP,Description="Duplication">\n')
         f.write('##ALT=<ID=INV,Description="Inversion">\n')
+        f.write('##INFO=<ID=AF_MID,Number=1,Type=Float,Description="Allele frequency in gnomAD Middle Eastern population">\n')
         f.write('##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">\n')
         header_cols = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT"]
         f.write("\t".join(header_cols + samples) + "\n")

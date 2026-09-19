@@ -208,3 +208,41 @@ def tool_compare_vcfs(
             f"[bold]delta precision:[/bold] "
             f"{result.metrics['delta_precision']:+.4f}"
         )
+
+
+@tool_app.command("local-pangenome")
+def tool_local_pangenome(
+    cohort: str = typer.Option(..., "--cohort", "-c",
+                               help="VCF de cohorte con INFO/AF"),
+    reference: str = typer.Option(..., "--reference", "-f",
+                                  help="FASTA de referencia del ROI (+ .fai)"),
+    region: str = typer.Option(..., "--region", "-r",
+                               help="Región chr:start-end"),
+    out: str = typer.Option(..., "--out", "-o",
+                            help="Directorio de salida"),
+    min_af: float = typer.Option(0.01, "--min-af",
+                                 help="Umbral de frecuencia alélica"),
+    af_field: str = typer.Option("AF", "--af-field",
+                                 help="Campo INFO con la frecuencia"),
+    contig: str = typer.Option(None, "--contig",
+                               help="Nombre del contig en el FASTA (override)"),
+) -> None:
+    from publicgenomicagent.tools.base import LocalPangenomeInput
+    from publicgenomicagent.tools.local_pangenome import local_pangenome
+
+    inp = LocalPangenomeInput(
+        cohort_vcf=Path(cohort),
+        reference_fasta=Path(reference),
+        region=region,
+        output_dir=Path(out),
+        min_af=min_af,
+        af_info_field=af_field,
+        contig_name=contig,
+    )
+    result = local_pangenome(inp)
+    console.print(f"[green]OK[/green] {result.message}")
+    console.print(f"  enriched: {result.enriched_fasta}")
+    console.print(f"  diff VCF: {result.diff_vcf}")
+    console.print(f"  report:   {result.report_json}")
+    for k, v in result.counts.items():
+        console.print(f"  {k}: {v}")
