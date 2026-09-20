@@ -9,6 +9,9 @@ envs:
   pga-pangenome:
     manifest: envs/pga-pangenome.yml
     description: "vg (grafos pangenómicos locales)"
+  pga-mendelian:
+    manifest: envs/pga-mendelian.yml
+    description: "plink + bcftools para análisis mendeliano"
 
 tools:
   python:
@@ -31,3 +34,8 @@ tools:
     binary: vg
     version_flag: "version"
     min_version: "1.70"
+  plink:
+    env: pga-mendelian
+    binary: plink
+    version_flag: "--version"
+    min_version: "1.90"
