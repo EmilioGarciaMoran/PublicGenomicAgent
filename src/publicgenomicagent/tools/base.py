@@ -119,3 +119,53 @@ class LocalPangenomeOutput(ToolOutput):
     diff_tbi: Path
     report_json: Path
     counts: dict[str, int] = {}
+
+
+# --- build_local_graph ------------------------------------------------
+
+class BuildLocalGraphInput(BaseModel):
+    reference_fasta: Path
+    cohort_vcf: Path
+    output_vg: Path
+    include_alt_paths: bool = True    # -a en vg construct
+    max_node_length: int = 32         # -m
+    region: str | None = None         # opcional, no usado en esta versión
+
+
+class BuildLocalGraphOutput(ToolOutput):
+    graph_vg: Path
+    graph_xg: Path
+    nodes: int = 0
+    edges: int = 0
+
+
+# --- align_to_graph ---------------------------------------------------
+
+class AlignToGraphInput(BaseModel):
+    graph_vg: Path
+    reads_fastq: Path
+    output_gam: Path
+    output_pack: Path | None = None
+    pack_min_quality: int = 5
+
+
+class AlignToGraphOutput(ToolOutput):
+    gam: Path
+    pack: Path | None = None
+    reads_aligned: int = 0
+    reads_total: int = 0
+
+
+# --- call_from_graph --------------------------------------------------
+
+class CallFromGraphInput(BaseModel):
+    graph_vg: Path
+    graph_xg: Path
+    pack: Path
+    output_vcf: Path
+
+
+class CallFromGraphOutput(ToolOutput):
+    vcf: Path
+    vcf_tbi: Path
+    variants_total: int = 0

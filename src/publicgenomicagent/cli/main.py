@@ -246,3 +246,87 @@ def tool_local_pangenome(
     console.print(f"  report:   {result.report_json}")
     for k, v in result.counts.items():
         console.print(f"  {k}: {v}")
+
+
+@tool_app.command("build-local-graph")
+def tool_build_local_graph(
+    reference: str = typer.Option(..., "--reference", "-f",
+                                  help="FASTA del ROI (+ .fai)"),
+    cohort: str = typer.Option(..., "--cohort", "-c",
+                               help="cohort VCF (con AF, SVs, etc.)"),
+    out: str = typer.Option(..., "--out", "-o",
+                            help="Fichero .vg de salida"),
+    no_alt: bool = typer.Option(False, "--no-alt-paths",
+                                help="No usar -a (desactiva alt paths)"),
+    max_node: int = typer.Option(32, "--max-node-length",
+                                 help="Longitud máxima de nodo (-m)"),
+) -> None:
+    from publicgenomicagent.tools.base import BuildLocalGraphInput
+    from publicgenomicagent.tools.local_graph import build_local_graph
+
+    inp = BuildLocalGraphInput(
+        reference_fasta=Path(reference),
+        cohort_vcf=Path(cohort),
+        output_vg=Path(out),
+        include_alt_paths=not no_alt,
+        max_node_length=max_node,
+    )
+    result = build_local_graph(_runtime(), inp)
+    console.print(f"[green]OK[/green] {result.message}")
+    console.print(f"  .vg: {result.graph_vg}")
+    console.print(f"  .xg: {result.graph_xg}")
+
+
+@tool_app.command("align-to-graph")
+def tool_align_to_graph(
+    graph: str = typer.Option(..., "--graph", "-g",
+                              help="Fichero .vg del grafo"),
+    reads: str = typer.Option(..., "--reads", "-r",
+                              help="Lecturas en FASTQ"),
+    out: str = typer.Option(..., "--out", "-o",
+                            help="GAM de salida"),
+    pack: str = typer.Option(None, "--pack",
+                             help="Pack de cobertura (opcional)"),
+    min_quality: int = typer.Option(5, "--min-quality",
+                                    help="Calidad mínima para pack"),
+) -> None:
+    from publicgenomicagent.tools.base import AlignToGraphInput
+    from publicgenomicagent.tools.local_graph import align_to_graph
+
+    inp = AlignToGraphInput(
+        graph_vg=Path(graph),
+        reads_fastq=Path(reads),
+        output_gam=Path(out),
+        output_pack=Path(pack) if pack else None,
+        pack_min_quality=min_quality,
+    )
+    result = align_to_graph(_runtime(), inp)
+    console.print(f"[green]OK[/green] {result.message}")
+    console.print(f"  GAM: {result.gam}")
+    if result.pack:
+        console.print(f"  pack: {result.pack}")
+
+
+@tool_app.command("call-from-graph")
+def tool_call_from_graph(
+    graph: str = typer.Option(..., "--graph", "-g",
+                              help="Fichero .vg del grafo"),
+    xg: str = typer.Option(..., "--xg", help="Índice .xg"),
+    pack: str = typer.Option(..., "--pack", help="Pack de cobertura"),
+    out: str = typer.Option(..., "--out", "-o",
+                            help="VCF de salida"),
+) -> None:
+    from publicgenomicagent.tools.base import CallFromGraphInput
+    from publicgenomicagent.tools.local_graph import call_from_graph
+
+    inp = CallFromGraphInput(
+        graph_vg=Path(graph),
+        graph_xg=Path(xg),
+        pack=Path(pack),
+        output_vcf=Path(out),
+    )
+    result = call_from_graph(_runtime(), inp)
+    console.print(f"[green]OK[/green] {result.message}")
+    console.print(f"  VCF: {result.vcf}")
+    if result.vcf_tbi.name:
+        console.print(f"  TBI: {result.vcf_tbi}")
