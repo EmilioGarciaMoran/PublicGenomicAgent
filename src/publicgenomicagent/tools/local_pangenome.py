@@ -182,9 +182,15 @@ def _filter_by_af(
 
 
 def _exclude_svs(in_vcf: Path, out_vcf: Path) -> int:
-    """Excluye SVs simbólicos. Devuelve nº de variantes."""
+    """Excluye todo lo que no sea SNV puro.
+
+    El consenso lineal solo puede representar SNVs sin desplazar
+    coordenadas. Los indels y SVs simbólicos cambian la longitud
+    de la secuencia, lo cual rompe la alineación de las lecturas
+    del BAM (que están alineadas contra GRCh38).
+    """
     subprocess.run(
-        [_bcftools(), "view", "-v", "snps,indels", str(in_vcf),
+        [_bcftools(), "view", "-v", "snps", str(in_vcf),
          "-Oz", "-o", str(out_vcf)],
         check=True,
     )

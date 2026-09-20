@@ -1,5 +1,6 @@
 """Simulación de genotipos: fundadores por Hardy-Weinberg,
-descendientes por segregación mendeliana.
+descendientes por segregación mendeliana, con soporte para
+genotipos forzados (variantes de interés clínico).
 """
 from __future__ import annotations
 
@@ -24,14 +25,28 @@ def simulate_snv_genotypes(
     pedigree: Pedigree,
     variants: list[dict],
     rng: random.Random,
+    forced: dict[str, dict[str, tuple[int, int]]] | None = None,
 ) -> dict[str, dict[str, tuple[int, int]]]:
-    """Devuelve {iid: {variant_id: (a1, a2)}}."""
+    """Devuelve {iid: {variant_id: (a1, a2)}}.
+
+    forced permite sobreescribir la simulación para variantes concretas.
+    Formato: {variant_id: {iid: (a1, a2), ...}, ...}
+    """
+    forced = forced or {}
     result: dict[str, dict[str, tuple[int, int]]] = {
         iid: {} for iid in pedigree.individuals
     }
 
     for v in variants:
         vid = v["variant_id"]
+
+        # Si la variante está forzada, aplicar la regla explícita
+        if vid in forced:
+            overrides = forced[vid]
+            for iid in pedigree.individuals:
+                result[iid][vid] = overrides.get(iid, (0, 0))
+            continue
+
         af = v.get("_af_mid", 0.0)
         # Fundadores
         for iid, ind in pedigree.individuals.items():
