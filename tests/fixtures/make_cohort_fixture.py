@@ -31,6 +31,17 @@ ROI_START = 110_000_000
 ROI_END = 110_025_000
 ROI_LEN = ROI_END - ROI_START
 SEED = 42
+
+# Variante de interés para demo de ganancia diagnóstica:
+# AF_MID = 4.4%, heredada del padre (F1) en heterocigosis.
+# C2 la porta en 0/1; F1 en 0/1; resto del pedigree 0/0.
+FORCED_VARIANT_ID = "2-110008979-A-T"
+FORCED_GENOTYPES = {
+    FORCED_VARIANT_ID: {
+        "F1": (0, 1),
+        "C2": (0, 1),
+    },
+}
 CONTIG = f"chr{ROI_CHROM}_roi"
 
 BCFTOOLS = str(Path("~/.pga/envs/pga-hts/bin/bcftools").expanduser())
@@ -51,6 +62,65 @@ def load_mid_variants():
             out.append(v)
     return out
 
+
+
+def _load_ref_seq_for_cluster():
+    """Carga la referencia del ROI para que los SNVs sintéticos
+    usen las bases reales de GRCh38 como REF."""
+    src = Path.home() / ".pga/cache/reference/hg38_chr2_110000001_110025000.fa"
+    if not src.exists():
+        return None, 110_000_001
+    lines = src.read_text().splitlines()
+    seq = "".join(l for l in lines if not l.startswith(">"))
+    return seq, 110_000_001
+
+
+def add_mena_cluster(variants, center_pos, n=8, span=200, seed=7):
+    """Añade n SNVs sintéticos MENA-específicos alrededor de center_pos.
+
+    Simula un haplotipo MENA que GRCh38 no tiene. Usa las bases reales
+    de GRCh38 como REF (leídas del FASTA cacheado).
+    """
+    import random as _rng
+    rng = _rng.Random(seed)
+    bases = "ACGT"
+
+    ref_seq, ref_start = _load_ref_seq_for_cluster()
+    if ref_seq is None:
+        raise RuntimeError(
+            "No se encuentra la referencia cacheada. "
+            "Ejecuta primero el fetch de UCSC."
+        )
+
+    used = {v["pos"] for v in variants}
+    new_variants = []
+    attempts = 0
+    while len(new_variants) < n and attempts < 500:
+        attempts += 1
+        offset = rng.randint(-span // 2, span // 2)
+        if offset == 0:
+            continue
+        pos = center_pos + offset
+        if pos in used:
+            continue
+        # Coordenada local en el FASTA cacheado
+        local_idx = pos - ref_start
+        if local_idx < 0 or local_idx >= len(ref_seq):
+            continue
+        ref = ref_seq[local_idx].upper()
+        alt = rng.choice([b for b in bases if b != ref])
+        vid = f"MENA_cluster_{pos}_{ref}_{alt}"
+        new_variants.append({
+            "variant_id": vid,
+            "pos": pos,
+            "ref": ref,
+            "alt": alt,
+            "_af_mid": rng.uniform(0.3, 0.6),
+            "_is_synthetic_mena": True,
+        })
+        used.add(pos)
+
+    return variants + new_variants
 
 def write_plain(path, pedigree, snv_genos, sv_genos, snv_vars, sv_cat):
     samples = pedigree.order_for_vcf()
@@ -151,8 +221,29 @@ def main():
     rng = random.Random(SEED)
     ped = build_standard_pedigree()
     snvs = load_mid_variants()
+
+    # Añadir cluster MENA alrededor de la variante objetivo para forzar
+    # reference bias. Las coordenadas de las variantes del cohort están
+    # en GENÓMICAS (se convierten a locales en write_plain).
+    # La variante objetivo es 2-110008979-A-T (genómica).
+    target_pos_genomic = 110_008_979
+    snvs = add_mena_cluster(snvs, center_pos=target_pos_genomic, n=8, span=200)
+
     cat = default_catalog(ROI_CHROM, ROI_START)
-    snv_g = simulate_snv_genotypes(ped, snvs, rng)
+
+    # El cluster MENA debe estar presente en C2 y sus padres
+    # (son SNVs comunes en MENA, no de novo)
+    mena_cluster_ids = [v["variant_id"] for v in snvs if v.get("_is_synthetic_mena")]
+    extra_forced = {}
+    for vid in mena_cluster_ids:
+        extra_forced[vid] = {
+            "GF1": (0, 1), "GM1": (0, 1), "GF2": (0, 1), "GM2": (0, 1),
+            "F1": (0, 1), "M1": (0, 1),
+            "C1": (0, 1), "C2": (0, 1), "C3": (0, 1), "C4": (0, 1),
+        }
+    forced_all = {**FORCED_GENOTYPES, **extra_forced}
+
+    snv_g = simulate_snv_genotypes(ped, snvs, rng, forced=forced_all)
     sv_g = simulate_sv_genotypes(ped, cat, rng)
 
     plain = outdir / "cohort.vcf"
