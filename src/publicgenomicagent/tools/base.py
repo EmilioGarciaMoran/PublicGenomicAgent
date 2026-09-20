@@ -169,3 +169,124 @@ class CallFromGraphOutput(ToolOutput):
     vcf: Path
     vcf_tbi: Path
     variants_total: int = 0
+
+
+# --- mendelian_filter ------------------------------------------------
+
+class IndividualSpec(BaseModel):
+    """Un individuo del pedigrí, con su nombre en el VCF y sus relaciones.
+
+    El LLM puede extraer esta información del relato clínico, o puede
+    venir de un .fam, o de un JSON estructurado. La tool solo consume
+    la estructura resultante.
+    """
+    sample: str                        # nombre en el VCF
+    sex: str = "U"                     # "M" | "F" | "U"
+    affected: bool = False
+    father: str | None = None          # sample del padre, si aplica
+    mother: str | None = None          # sample de la madre, si aplica
+
+
+class MendelianFilterInput(BaseModel):
+    trio_vcf: Path
+    output_dir: Path
+    pedigree: list[IndividualSpec]
+    proband: str                       # sample del probando a analizar
+    min_dp: int = 10
+    min_qual: int = 20
+
+
+class MendelianFilterOutput(ToolOutput):
+    de_novo_vcf: Path
+    auto_rec_hom_vcf: Path
+    auto_dom_vcf: Path
+    x_linked_rec_vcf: Path | None = None
+    report_json: Path
+    counts: dict[str, int] = {}
+
+
+# --- plink_validate -------------------------------------------------
+
+class PlinkValidateInput(BaseModel):
+    trio_vcf: Path
+    output_dir: Path
+    pedigree: list[IndividualSpec]
+    proband: str
+
+
+class PlinkValidateOutput(ToolOutput):
+    bed_prefix: Path
+    mendel_errors: Path
+    ibd_report: Path
+    report_json: Path
+    n_mendel_errors: int = 0
+
+
+# --- CaseManifest ---------------------------------------------------
+
+class GenomicRange(BaseModel):
+    chrom: str
+    start: int
+    end: int
+    label: str = ""    # por ejemplo, nombre del gen
+
+
+class CaseManifest(BaseModel):
+    """Contenedor flexible de un caso.
+
+    No todos los casos tienen todos los componentes. El sistema debe
+    degradar funcionalidad según lo que falte:
+
+    - Sin pedigree: no se puede aplicar mendelian_filter.
+    - Sin hpo_terms: no se puede priorizar por fenotipo.
+    - Sin candidate_rois: el sistema debe derivarlos (por HPO o por
+      búsqueda bibliográfica).
+
+    Al menos uno de {pedigree, hpo_terms, candidate_rois} debe estar
+    presente.
+    """
+    case_id: str
+    source: str = "clinical"      # clinical | bibliography | cohort | population
+
+    # Estructura familiar (opcional)
+    pedigree: list[IndividualSpec] = []
+    proband: str | None = None
+    consanguinity: bool = False
+
+    # Fenotipo (opcional)
+    hpo_terms: dict[str, list[str]] = {}   # sample -> [HPO IDs]
+    phenotype_text: dict[str, str] = {}    # sample -> relato libre
+    affected_samples: list[str] = []
+
+    # Regiones de interés (opcional)
+    candidate_rois: list[GenomicRange] = []
+    candidate_genes: list[str] = []
+
+    # Trazabilidad
+    confidence: float = 1.0
+    extractor: str = ""            # "llm:model" | "manual" | "fam-file"
+    confirmed_by: str | None = None
+
+    def has_pedigree(self) -> bool:
+        return len(self.pedigree) > 0 and self.proband is not None
+
+    def has_phenotype(self) -> bool:
+        return len(self.hpo_terms) > 0 or len(self.phenotype_text) > 0
+
+    def has_rois(self) -> bool:
+        return len(self.candidate_rois) > 0
+
+    def validate_minimum(self) -> None:
+        """Verifica que el manifiesto tiene al menos un componente."""
+        if not (self.has_pedigree() or self.has_phenotype() or self.has_rois()):
+            raise ValueError(
+                "CaseManifest requiere al menos uno de: pedigree, "
+                "hpo_terms/phenotype_text, o candidate_rois"
+            )
+
+    def get_parents(self, sample: str) -> tuple[str | None, str | None]:
+        """Devuelve (father, mother) para un sample."""
+        for ind in self.pedigree:
+            if ind.sample == sample:
+                return ind.father, ind.mother
+        return None, None
