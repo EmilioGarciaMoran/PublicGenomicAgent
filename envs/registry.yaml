@@ -6,6 +6,9 @@ envs:
   pga-hts:
     manifest: envs/pga-hts.yml
     description: "htslib (samtools, bcftools, tabix, bgzip)"
+  pga-pangenome:
+    manifest: envs/pga-pangenome.yml
+    description: "vg (grafos pangenómicos locales)"
 
 tools:
   python:
@@ -23,3 +26,8 @@ tools:
     binary: bcftools
     version_flag: "--version"
     min_version: "1.19"
+  vg:
+    env: pga-pangenome
+    binary: vg
+    version_flag: "version"
+    min_version: "1.70"
