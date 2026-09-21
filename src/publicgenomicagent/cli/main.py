@@ -330,3 +330,84 @@ def tool_call_from_graph(
     console.print(f"  VCF: {result.vcf}")
     if result.vcf_tbi.name:
         console.print(f"  TBI: {result.vcf_tbi}")
+
+
+@tool_app.command("mendelian-filter")
+def tool_mendelian_filter(
+    vcf: str = typer.Option(..., "--vcf", "-i",
+                            help="VCF del trío"),
+    out: str = typer.Option(..., "--out", "-o",
+                            help="Directorio de salida"),
+    pedigree_fam: str = typer.Option(None, "--pedigree-fam",
+                                     help=".fam con el pedigrí"),
+    proband: str = typer.Option(..., "--proband",
+                                help="Sample del probando"),
+    affected: str = typer.Option("", "--affected",
+                                 help="Samples afectados, coma-separados"),
+    filter_by_affected: bool = typer.Option(
+        True, "--filter-by-affected/--no-filter-by-affected",
+        help="Exigir progenitor afectado en dominante. "
+             "Desactivar para penetrancia incompleta.",
+    ),
+    min_dp: int = typer.Option(10, "--min-dp"),
+    min_qual: int = typer.Option(20, "--min-qual"),
+) -> None:
+    from publicgenomicagent.tools.base import MendelianFilterInput
+    from publicgenomicagent.tools.mendelian import mendelian_filter
+    from publicgenomicagent.tools.pedigree import load_pedigree_from_fam
+
+    if not pedigree_fam:
+        console.print("[red]Falta --pedigree-fam[/red]")
+        raise typer.Exit(code=2)
+
+    pedigree = load_pedigree_from_fam(Path(pedigree_fam))
+
+    # Si el usuario pasa --affected, sobreescribir el flag affected
+    # en cada IndividualSpec correspondiente.
+    if affected:
+        affected_list = [s.strip() for s in affected.split(",") if s.strip()]
+        for ind in pedigree:
+            ind.affected = ind.sample in affected_list
+
+    inp = MendelianFilterInput(
+        trio_vcf=Path(vcf),
+        output_dir=Path(out),
+        pedigree=pedigree,
+        proband=proband,
+        min_dp=min_dp,
+        min_qual=min_qual,
+        filter_by_affected=filter_by_affected,
+    )
+
+    result = mendelian_filter(inp)
+    console.print(f"[green]OK[/green] {result.message}")
+    for k, v in result.counts.items():
+        console.print(f"  {k}: {v}")
+
+
+@tool_app.command("plink-validate")
+def tool_plink_validate(
+    vcf: str = typer.Option(..., "--vcf", "-i",
+                            help="VCF del trío"),
+    out: str = typer.Option(..., "--out", "-o",
+                            help="Directorio de salida"),
+    pedigree_fam: str = typer.Option(..., "--pedigree-fam",
+                                     help=".fam con el pedigrí"),
+    proband: str = typer.Option(..., "--proband",
+                                help="Sample del probando"),
+) -> None:
+    from publicgenomicagent.tools.base import PlinkValidateInput
+    from publicgenomicagent.tools.mendelian import plink_validate
+    from publicgenomicagent.tools.pedigree import load_pedigree_from_fam
+
+    pedigree = load_pedigree_from_fam(Path(pedigree_fam))
+    inp = PlinkValidateInput(
+        trio_vcf=Path(vcf),
+        output_dir=Path(out),
+        pedigree=pedigree,
+        proband=proband,
+    )
+    result = plink_validate(inp)
+    console.print(f"[green]OK[/green] {result.message}")
+    console.print(f"  mendel: {result.mendel_errors}")
+    console.print(f"  ibd:    {result.ibd_report}")

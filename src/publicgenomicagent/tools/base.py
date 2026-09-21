@@ -194,6 +194,9 @@ class MendelianFilterInput(BaseModel):
     proband: str                       # sample del probando a analizar
     min_dp: int = 10
     min_qual: int = 20
+    filter_by_affected: bool = True    # si False, dominante no exige
+                                       # progenitor afectado (penetrancia
+                                       # incompleta, variantes de riesgo)
 
 
 class MendelianFilterOutput(ToolOutput):
