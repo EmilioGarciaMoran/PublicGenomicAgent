@@ -479,12 +479,19 @@ def _write_fam(pedigree: list[IndividualSpec], out_fam: Path) -> None:
 
 
 def _vcf_to_plink(vcf: Path, out_prefix: Path) -> None:
-    """Convierte VCF a formato PLINK (bed/bim/fam)."""
+    """Convierte VCF a formato PLINK (bed/bim/fam).
+
+    Usa --allow-extra-chr para aceptar nombres de cromosoma no
+    estándar (por ejemplo, chr2_roi, o subregiones locales). Usa
+    --double-id para aceptar sample IDs sin formato FID/IID.
+    """
     subprocess.run(
         [_plink(), "--vcf", str(vcf),
          "--make-bed",
          "--out", str(out_prefix),
          "--allow-no-sex",
+         "--allow-extra-chr",
+         "--double-id",
          "--silent"],
         check=True, capture_output=True,
     )
@@ -521,6 +528,7 @@ def plink_validate(inp: PlinkValidateInput) -> PlinkValidateOutput:
              "--mendel",
              "--out", str(outdir / "plink_mendel_run"),
              "--allow-no-sex",
+             "--allow-extra-chr",
              "--silent"],
             check=True, stdout=f, stderr=subprocess.STDOUT,
         )
@@ -533,6 +541,12 @@ def plink_validate(inp: PlinkValidateInput) -> PlinkValidateOutput:
             if "NONE" in line.upper() or not line.strip():
                 continue
             n_errors += 1
+    else:
+        # PLINK no crea el .mendel si no hay errores.
+        # Creamos un placeholder para dejar constancia de que se ejecutó.
+        mendel_summary.write_text(
+            "# PLINK no reportó errores mendelianos (fichero vacío).\n"
+        )
 
     # --genome: IBD entre individuos
     ibd_path = outdir / "plink_ibd.genome"
@@ -541,6 +555,7 @@ def plink_validate(inp: PlinkValidateInput) -> PlinkValidateOutput:
          "--genome",
          "--out", str(outdir / "plink_ibd_run"),
          "--allow-no-sex",
+         "--allow-extra-chr",
          "--silent"],
         check=True, capture_output=True,
     )
