@@ -12,6 +12,9 @@ envs:
   pga-mendelian:
     manifest: envs/pga-mendelian.yml
     description: "plink + bcftools para análisis mendeliano"
+  pga-phenotype:
+    manifest: envs/pga-phenotype.yml
+    description: "RDMA + transformers para extracción HPO/ORPHA"
 
 tools:
   python:

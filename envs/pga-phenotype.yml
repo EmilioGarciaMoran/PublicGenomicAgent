@@ -1,0 +1,37 @@
+name: pga-phenotype
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.11
+  - pip
+  - numpy>=1.26
+  - pandas>=2.0
+  - pyyaml>=6
+  - pip:
+      # RDMA core + dependencias
+      - torch>=2.0
+      - transformers>=4.40
+      - accelerate>=0.26
+      - sentence-transformers>=3.0
+      - fastembed>=0.6
+      - faiss-cpu>=1.8
+      - huggingface_hub>=0.23
+      - tqdm>=4.66
+      - fuzzywuzzy>=0.18
+      - python-Levenshtein>=0.25
+      - rapidfuzz>=3.0
+      - pyhpo>=3.1
+      - openai>=1.0
+      - groq>=0.24
+      - langchain-openai>=0.1
+      - python-dotenv>=1.0
+      - ratelimit>=2.2
+      # Dependencias transitivas de RDMA no declaradas en su pyproject
+      - nltk>=3.9
+      - stanza>=1.10
+      - peft>=0.11
+      - joblib>=1.4
+      - sent2vec>=0.3
+      # RDMA pineado a un commit específico
+      - git+https://github.com/jhnwu3/RDMA.git@469be6121832a35e19cc5c5ef407a200f0e49da1
