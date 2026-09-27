@@ -293,3 +293,29 @@ class CaseManifest(BaseModel):
             if ind.sample == sample:
                 return ind.father, ind.mother
         return None, None
+
+
+# --- extract_hpo (RDMA) ----------------------------------------------
+
+class ExtractHPOInput(BaseModel):
+    text: str
+    output_dir: Path
+    backend: str = "local"                    # local | openrouter | api | azure | llama_cpp
+    model_type: str = "mistral_24b"
+    device: str = "auto"
+    rdma_cache_dir: Path | None = None        # ~/.pga/cache/rdma
+    model_cache_dir: Path | None = None       # ~/.pga/cache/models
+    extractor_type: str = "retrieval"         # simple | iterative | multi | retrieval
+    verifier_version: str = "v4"              # v2 | v3 | v4
+    negation: bool = True
+    family_history: bool = True
+    skip_verification: bool = False
+    top_k: int = 5
+
+
+class ExtractHPOOutput(ToolOutput):
+    hpo_terms_json: Path
+    entities_json: Path
+    hpo_ids: list[str] = []
+    counts: dict[str, int] = {}
+    report_json: Path

@@ -411,3 +411,44 @@ def tool_plink_validate(
     console.print(f"[green]OK[/green] {result.message}")
     console.print(f"  mendel: {result.mendel_errors}")
     console.print(f"  ibd:    {result.ibd_report}")
+
+
+@tool_app.command("extract-hpo")
+def tool_extract_hpo(
+    text: str = typer.Option(..., "--text", "-t",
+                             help="Texto clínico (en inglés)"),
+    out: str = typer.Option(..., "--out", "-o",
+                            help="Directorio de salida"),
+    backend: str = typer.Option("local", "--backend",
+                                help="local | openrouter | api | azure | llama_cpp"),
+    model: str = typer.Option("mistral_24b", "--model",
+                              help="Tipo de modelo (mistral_24b, llama3_70b, ...)"),
+    device: str = typer.Option("auto", "--device",
+                               help="cuda:0 | cpu | auto"),
+    extractor: str = typer.Option("retrieval", "--extractor",
+                                  help="simple | iterative | multi | retrieval"),
+    skip_verification: bool = typer.Option(
+        False, "--skip-verification",
+        help="Omitir la fase de verificación (más rápido, menos preciso)",
+    ),
+    rdma_cache: str = typer.Option(None, "--rdma-cache",
+                                   help="Directorio de cache RDMA (default: ~/.pga/cache/rdma)"),
+) -> None:
+    from publicgenomicagent.tools.base import ExtractHPOInput
+    from publicgenomicagent.tools.extract_hpo import extract_hpo
+
+    inp = ExtractHPOInput(
+        text=text,
+        output_dir=Path(out),
+        backend=backend,
+        model_type=model,
+        device=device,
+        extractor_type=extractor,
+        skip_verification=skip_verification,
+        rdma_cache_dir=Path(rdma_cache) if rdma_cache else None,
+    )
+    result = extract_hpo(inp)
+    console.print(f"[green]OK[/green] {result.message}")
+    for k, v in result.counts.items():
+        console.print(f"  {k}: {v}")
+    console.print(f"  → {result.hpo_terms_json}")
