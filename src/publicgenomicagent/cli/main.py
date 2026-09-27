@@ -499,3 +499,40 @@ def tool_phenotype_ranking(
             f"    {c['rank']:>3}  {c['disease_name']}  "
             f"({c['disease_curie']})  post={c['posttest_prob']}"
         )
+
+
+# ----------------------------- phenotype -------------------------------
+
+phenotype_app = typer.Typer(help="Bootstrap de la capa de fenotipo")
+app.add_typer(phenotype_app, name="phenotype")
+
+
+@phenotype_app.command("bootstrap")
+def phenotype_bootstrap(
+    only_rdma: bool = typer.Option(False, "--only-rdma",
+                                   help="Solo descargar vector stores de RDMA"),
+    only_lirical: bool = typer.Option(False, "--only-lirical",
+                                      help="Solo instalar LIRICAL"),
+    with_model: bool = typer.Option(False, "--with-model",
+                                    help="Descargar Mistral 24B (~14 GB, requiere GPU)"),
+) -> None:
+    """Descarga y configura la capa de fenotipo (RDMA + LIRICAL)."""
+    import subprocess
+    import sys
+    from publicgenomicagent.env.paths import repo_root
+
+    script = repo_root() / "scripts" / "phenotype_bootstrap.py"
+    if not script.exists():
+        console.print(f"[red]Script no encontrado:[/red] {script}")
+        raise typer.Exit(code=2)
+
+    args = [sys.executable, str(script)]
+    if only_rdma:
+        args.append("--only-rdma")
+    if only_lirical:
+        args.append("--only-lirical")
+    if with_model:
+        args.append("--with-model")
+
+    result = subprocess.run(args, check=False)
+    raise typer.Exit(code=result.returncode)
