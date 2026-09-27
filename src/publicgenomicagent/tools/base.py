@@ -319,3 +319,26 @@ class ExtractHPOOutput(ToolOutput):
     hpo_ids: list[str] = []
     counts: dict[str, int] = {}
     report_json: Path
+
+
+# --- phenotype_ranking (LIRICAL) -------------------------------------
+
+class PhenotypeRankingInput(BaseModel):
+    hpo_ids: list[str]
+    negated_hpo_ids: list[str] = []
+    output_dir: Path
+    vcf: Path | None = None                # opcional, modo genotipo-aware
+    assembly: str = "hg38"                 # hg19 | hg38
+    sex: str = "UNKNOWN"                   # MALE | FEMALE | UNKNOWN
+    age: str | None = None                 # edad en formato ISO o texto libre
+    top_n: int = 50                        # candidatos a incluir en el output
+    lirical_dir: Path | None = None        # ~/.pga/cache/lirical
+    java_bin: str = "java"
+    timeout_seconds: int = 600             # 10 minutos máximo
+
+
+class PhenotypeRankingOutput(ToolOutput):
+    ranking_tsv: Path
+    top_candidates: list[dict] = []
+    counts: dict[str, int] = {}
+    report_json: Path

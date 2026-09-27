@@ -452,3 +452,50 @@ def tool_extract_hpo(
     for k, v in result.counts.items():
         console.print(f"  {k}: {v}")
     console.print(f"  → {result.hpo_terms_json}")
+
+
+@tool_app.command("phenotype-ranking")
+def tool_phenotype_ranking(
+    hpo: str = typer.Option(..., "--hpo", "-p",
+                            help="HPO IDs separados por coma (HP:0000083,HP:0004322)"),
+    out: str = typer.Option(..., "--out", "-o",
+                            help="Directorio de salida"),
+    negated: str = typer.Option("", "--negated",
+                                help="HPO negados, separados por coma"),
+    vcf: str = typer.Option(None, "--vcf",
+                            help="VCF del paciente (modo genotipo-aware, opcional)"),
+    assembly: str = typer.Option("hg38", "--assembly",
+                                 help="hg19 | hg38 (solo con VCF)"),
+    sex: str = typer.Option("UNKNOWN", "--sex",
+                            help="MALE | FEMALE | UNKNOWN"),
+    age: str = typer.Option(None, "--age", help="Edad del probando"),
+    top_n: int = typer.Option(50, "--top-n", help="Candidatos a incluir en el report"),
+    lirical_dir: str = typer.Option(None, "--lirical-dir",
+                                    help="Directorio de LIRICAL (default: ~/.pga/cache/lirical)"),
+) -> None:
+    from publicgenomicagent.tools.base import PhenotypeRankingInput
+    from publicgenomicagent.tools.phenotype_ranking import phenotype_ranking
+
+    hpo_ids = [h.strip() for h in hpo.split(",") if h.strip()]
+    negated_ids = [h.strip() for h in negated.split(",") if h.strip()]
+
+    inp = PhenotypeRankingInput(
+        hpo_ids=hpo_ids,
+        negated_hpo_ids=negated_ids,
+        output_dir=Path(out),
+        vcf=Path(vcf) if vcf else None,
+        assembly=assembly,
+        sex=sex,
+        age=age,
+        top_n=top_n,
+        lirical_dir=Path(lirical_dir) if lirical_dir else None,
+    )
+    result = phenotype_ranking(inp)
+    console.print(f"[green]OK[/green] {result.message}")
+    console.print(f"  TSV: {result.ranking_tsv}")
+    console.print(f"  Top 5:")
+    for c in result.top_candidates[:5]:
+        console.print(
+            f"    {c['rank']:>3}  {c['disease_name']}  "
+            f"({c['disease_curie']})  post={c['posttest_prob']}"
+        )
