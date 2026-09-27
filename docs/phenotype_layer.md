@@ -258,3 +258,110 @@ Extensión del fixture NPHP1:
   estado explícito (not_assessed).
 - Fusión de cohortes de fenotipo (Al Mena, EGP, gnomAD MID):
   pendiente, en paralelo a local_pangenome.md sección 10.
+
+---
+
+## 14. Requisitos de hardware (actualizado)
+
+La extracción de fenotipos con RDMA **no cabe en un MacBook Air de 16 GB**.
+
+### Números reales
+
+El modelo recomendado por RDMA es **Mistral Small 24B en 4-bit**:
+
+| Componente | VRAM/RAM |
+|---|---|
+| Pesos del modelo (24B, 4-bit NF4) | ~14 GB |
+| KV cache (contexto 8k) | ~1 GB |
+| Overhead del runtime (PyTorch, bitsandbytes) | ~2-3 GB |
+| **Total mínimo** | **~17-18 GB** |
+
+Esto descarta:
+- MacBook Air 16 GB RAM unificada.
+- Cualquier portátil con GPU < 20 GB VRAM.
+
+### Hardware mínimo viable
+
+- **GPU NVIDIA RTX 3090 (24 GB VRAM)** — recomendada explícitamente por el paper de RDMA.
+- **GPU NVIDIA RTX 4090 / A5000 (24 GB VRAM)** — equivalente.
+- **Mac con ≥32 GB RAM unificada** — vía backend `llama_cpp` con GGUF (no probado aún).
+- **Servidor con A100/H100** — para uso hospitalario.
+
+### Modelos más pequeños: no es una opción
+
+El paper de RDMA es explícito: **por debajo de 24B, los modelos no siguen el "structured output" de forma fiable** y la precisión cae drásticamente. No es aceptable para uso clínico.
+
+### Consecuencia arquitectónica
+
+El sistema PublicGenomicAgent tiene dos naturalezas:
+
+**Capa de variantes (BAMs, ROIs, grafos)**:
+- Cabe en un portátil modesto (16 GB RAM).
+- Funciona sin GPU.
+- `fetch_roi`, `qc_bam`, `call_variants`, `local_pangenome`, `build_local_graph`, `align_to_graph`, `call_from_graph`, `compare_vcfs`, `mendelian_filter`.
+
+**Capa de fenotipo (extracción HPO/ORPHA)**:
+- Requiere GPU ≥20 GB VRAM **o** servidor dedicado.
+- No cabe en un portátil de 16 GB.
+- `extract_hpo` (RDMA).
+
+Para un despliegue hospitalario (KFSHRC, KAUST), la arquitectura natural es:
+
+    [MacBook Air del genetista]                    [Servidor GPU]
+         │                                              │
+         │  fetch_roi, vg, call_variants                │
+         │  (todo lo que no necesita LLM)               │
+         │                                              │
+         │  texto clínico ──────────────────────────────>
+         │                                              │  RDMA
+         │                                              │  (Mistral 24B 4-bit)
+         │  <──────────────────── hpo_terms.json ───────│
+         │                                              │
+         ▼                                              ▼
+
+El Mac es el terminal clínico. El servidor GPU es el motor de extracción
+de fenotipos. Los datos nunca salen de la red local.
+
+Esta división es coherente con los requisitos de privacidad del contexto
+saudí: los datos clínicos de pacientes no pueden salir del país ni
+enviarse a APIs externas.
+
+### Estado actual del código
+
+`extract_hpo` (tool `pga tool extract-hpo`) soporta 5 backends:
+
+- `local` → HuggingFace + bitsandbytes. Requiere GPU ≥20 GB.
+- `llama_cpp` → GGUF local. Requiere ~14 GB RAM. No probado aún.
+- `openrouter` → API externa. **No apto para datos clínicos reales.**
+- `api` (Groq) → API externa. **No apto para datos clínicos reales.**
+- `azure` → API externa. **No apto para datos clínicos reales.**
+
+Los tres últimos son válidos **solo para pruebas y desarrollo**.
+
+### Verificación sin GPU
+
+Sin GPU, `extract_hpo` falla en **menos de 10 segundos** con un mensaje
+claro:
+
+    RuntimeError: Backend 'local' requiere GPU NVIDIA con CUDA.
+    No se detectó CUDA disponible. Alternativas: --backend openrouter
+    o --backend api, o usar una máquina con GPU (>=20 GB VRAM para
+    Mistral 24B).
+
+Esto es deliberado: el sistema **no intenta** cargar 14 GB de modelo en
+CPU ni descargar 48 GB de pesos. Falla antes.
+
+### Trabajo futuro (arquitectura de servidor)
+
+Para el despliegue hospitalario real, las piezas que faltarán son:
+
+1. **Servidor RDMA**: servicio FastAPI que expone `POST /extract_hpo`
+   con el texto clínico y devuelve el JSON de términos HPO.
+2. **Backend `remote` en `extract_hpo`**: cliente HTTP que envía el
+   texto al servidor y recibe la respuesta.
+3. **Autenticación y cifrado**: TLS + tokens, para red hospitalaria.
+4. **Docker/compose**: empaquetado del servidor para despliegue en
+   KFSHRC, KAUST, etc.
+
+Estas piezas se implementarán cuando haya un caso de uso real con
+hardware disponible.
