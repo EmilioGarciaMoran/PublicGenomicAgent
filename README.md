@@ -13,7 +13,7 @@ PublicGenomicAgent no es un pipeline. Un pipeline produce ficheros;
 este sistema produce decisiones.
 
 Entrada: un BAM ya alineado + una consulta clínica (fenotipo,
-familia, sospecha diagnóstica).
+familia, sospecha diagnóstica) + opcionalmente un texto clínico.
 
 Salida: una decisión cuantificada sobre variantes candidatas,
 con estadística mendeliana, pangenomización local, y trazabilidad
@@ -22,9 +22,6 @@ completa del proceso.
 El VCF es el lenguaje intermedio. La decisión es el producto.
 
 ## Enfoque: clínico, no genómico
-
-PublicGenomicAgent no es un pipeline genómico más. Es una herramienta
-clínica que usa genómica como sustrato.
 
 | Aspecto | Pipeline genómico | PublicGenomicAgent |
 |---|---|---|
@@ -46,85 +43,85 @@ El valor del sistema está en la capa clínica: interpretación dirigida
 por fenotipo sobre BAMs existentes, con pangenomización local para
 corregir el reference bias poblacional.
 
-## Núcleo: pangenomización local
+## Pipeline
 
-En poblaciones infrarrepresentadas (Middle East, minorías), GRCh38
-produce falsos negativos por reference bias. El sistema construye
-un **consenso enriquecido del ROI** que incorpora alelos comunes de
-una cohorte poblacional, y llama variantes contra ese consenso en
-lugar de contra GRCh38.
+Texto clínico
+    ↓
+extract_hpo (RDMA, GPU)  →  HPO terms
+    ↓
+phenotype_ranking (LIRICAL, CPU)  →  enfermedades rankeadas
+    ↓
+fetch_roi → qc → call_variants → local_pangenome → build_local_graph
+    ↓
+mendelian_filter → plink_validate
+    ↓
+compare_vcfs → delta
 
-La métrica de éxito no es "el consenso es bonito". Es el **VCF
-diferencial**: `patient_grch38.vcf` vs `patient_enriched.vcf`. Las
-variantes que aparecen solo en el segundo son candidatas a falsos
-negativos recuperados.
+Cada paso es una tool del CLI. Todas son deterministas, auditables
+y se pueden encadenar.
 
-Ver `docs/local_pangenome.md` para el diseño completo.
+## Instalación
 
-## Estado
-
-En desarrollo activo. Implementado:
-
-- Capa de virtualización con micromamba (`pga env`).
-- `fetch_roi`: corta BAMs por rango genómico.
-- `qc_bam`: control de calidad estructural y de conteos.
-- `call_variants`: variant calling quirúrgico (single-sample).
-- `local_pangenome`: consenso enriquecido del ROI.
-- `compare_vcfs`: benchmarking VCF vs VCF (delta categorizado).
-
-Pendiente:
-
-- `mendelian`: filtros según pedigree.
-- Phasing por trío.
-- Simulador de BAM del paciente.
-- Capa agéntica (LLM) y UI conversacional.
-- Cohortes locales reales (KFSHRC, Al Mena).
-
-## Requisitos
-
+Requisitos:
 - Linux o macOS
-- [micromamba](https://mamba.readthedocs.io/) en `PATH`, o
-  `MICROMAMBA_BIN=/ruta/a/micromamba`
-- Espacio en disco para entornos (~500 MB por familia)
-- BAMs ya alineados a hg38 (no incluidos)
+- micromamba en PATH
+- Java 17+ (para LIRICAL)
+- Opcional: GPU NVIDIA ≥20 GB (para extracción HPO con RDMA)
 
-## Arranque desde cero
+### Bootstrap desde cero
 
-Crear el entorno base (único paso manual):
+    git clone https://github.com/EmilioGarciaMoran/PublicGenomicAgent
+    cd PublicGenomicAgent
 
+    # 1. Crear el entorno base (una sola vez)
     micromamba create -y -p ~/.pga/envs/pga-core -f envs/pga-core.yml
     micromamba run -p ~/.pga/envs/pga-core pip install -e .
 
-A partir de ahí, todo vía CLI:
-
+    # 2. Crear los entornos de herramientas
     ~/.pga/envs/pga-core/bin/pga env bootstrap pga-hts
-    ~/.pga/envs/pga-core/bin/pga env list
+    ~/.pga/envs/pga-core/bin/pga env bootstrap pga-pangenome
+    ~/.pga/envs/pga-core/bin/pga env bootstrap pga-mendelian
+    ~/.pga/envs/pga-core/bin/pga env bootstrap pga-phenotype
+
+    # 3. Bootstrap de la capa de fenotipo (datos de RDMA + LIRICAL)
+    ~/.pga/envs/pga-core/bin/pga phenotype bootstrap
+
+    # 4. Verificar
     ~/.pga/envs/pga-core/bin/pga env verify
 
-## Uso típico
+Con eso el sistema está operativo. Ver docs/installation.md para
+detalles y solución de problemas.
 
-    # Cortar el BAM del paciente al ROI clínico
-    pga tool fetch-roi --bam patient.bam \
-      --region chr2:110000000-110025000 --out roi.bam
+## Uso rápido
 
-    # Control de calidad
+### Capa genómica (sin GPU)
+
+    pga tool fetch-roi --bam patient.bam --region chr2:110000000-110025000 --out roi.bam
     pga tool qc --bam roi.bam --level counts --expected-sample PAT001
+    pga tool call-variants --bam roi.bam --reference hg38_roi.fa --out patient.vcf.gz
+    pga tool mendelian-filter --vcf trio.vcf.gz --pedigree-fam trio.fam --proband C2
 
-    # Construir la referencia enriquecida del ROI
-    pga tool local-pangenome --cohort gnomad_mid.vcf.gz \
-      --reference hg38_roi.fa --region chr2_roi:1-25000 \
-      --out enriched/ --min-af 0.05 --af-field AF_MID
+### Capa de fenotipo
 
-    # Llamar variantes contra GRCh38 (baseline) y contra el enriquecido
-    pga tool call-variants --bam roi.bam --reference hg38_roi.fa \
-      --out patient_grch38.vcf.gz
-    pga tool call-variants --bam roi.bam --reference enriched/enriched_roi.fa \
-      --out patient_enriched.vcf.gz
+    # Extracción de HPO desde texto (requiere GPU ≥20 GB)
+    pga tool extract-hpo --text "patient with renal failure" --out ./hpo
 
-    # Comparar los dos callings
+    # Priorización de enfermedades desde HPO (solo CPU)
+    pga tool phenotype-ranking --hpo "HP:0000083,HP:0004322" --out ./rank
+
+### Pangenomización local
+
+    pga tool local-pangenome --cohort cohort.vcf.gz --reference hg38_roi.fa \
+      --region chr2_roi:1-25000 --out ./enriched --min-af 0.05
+
+    pga tool build-local-graph --reference hg38_roi.fa \
+      --cohort cohort.vcf.gz --out roi.vg
+
     pga tool compare-vcfs --baseline patient_grch38.vcf.gz \
-      --candidate patient_enriched.vcf.gz \
-      --out delta.vcf.gz --report delta.json
+      --candidate patient_pga.vcf.gz --out delta.vcf.gz --report delta.json
+
+Ver docs/quickstart.md para un ejemplo end-to-end con el fixture
+NPHP1 (trío con fallo renal y enanismo).
 
 ## Estructura
 
@@ -132,13 +129,46 @@ A partir de ahí, todo vía CLI:
     src/          código del paquete publicgenomicagent
     docs/         documentación de diseño
     tests/        tests unitarios e integración
+    scripts/      scripts de bootstrap y utilidades
 
 ## Documentación
 
-- `docs/virtualization.md` — capa de entornos aislados.
-- `docs/local_pangenome.md` — núcleo: pangenomización local.
-- `docs/agentic_layer.md` — restricción de diseño para el agente LLM.
+Diseño conceptual:
 
-## Cita
+- docs/virtualization.md — capa de entornos aislados.
+- docs/local_pangenome.md — núcleo: pangenomización local.
+- docs/decision_not_pipeline.md — por qué es distinto.
+- docs/mendelian_segregation.md — la genética clínica como lógica.
+- docs/phenotype_layer.md — capa de fenotipo.
+- docs/audit_and_training.md — sesiones registradas y formación.
 
-Si usas este software en investigación, ver `CITATION.cff` (pendiente).
+Guías de uso:
+
+- docs/installation.md — instalación detallada y troubleshooting.
+- docs/quickstart.md — ejemplo end-to-end.
+- docs/use_cases.md — cuatro escenarios de uso.
+
+Demos reproducibles:
+
+- docs/demo_nphp1.md — experimento lineal.
+- docs/demo_nphp1_graph.md — comparación lineal vs grafo.
+- docs/demo_nphp1_mena.md — grafo recupera SNVs MENA.
+- docs/demo_nphp1_trio.md — joint calling del trío.
+
+Setup de herramientas externas:
+
+- docs/lirical_setup.md — instalación y bug conocido.
+
+## Estado
+
+En desarrollo activo. 12 tools funcionales, 5 entornos aislados,
+26 tests verdes.
+
+Capa genómica (sin GPU): completa.
+
+Capa de fenotipo (extracción HPO): requiere GPU ≥20 GB o servidor
+dedicado. Ver docs/phenotype_layer.md sección 14.
+
+## Licencia
+
+MIT. Ver LICENSE.
