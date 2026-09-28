@@ -260,6 +260,24 @@ def call_from_graph(
     )
     vcf_plain.unlink()
 
+    # Renombrar el sample si se ha proporcionado un nombre
+    # (vg call produce "SAMPLE" por defecto)
+    if inp.sample_name:
+        # bcftools reheader -s <(echo NAME) es la forma limpia,
+        # pero desde Python es más simple escribir un fichero temporal
+        # con el nombre y usar reheader -s.
+        samples_file = vcf_gz.parent / "_samples.txt"
+        samples_file.write_text(inp.sample_name + "\n")
+        vcf_gz_renamed = vcf_gz.with_name(vcf_gz.stem + "_renamed.vcf.gz")
+        runtime.run(
+            "bcftools",
+            ["reheader", "-s", str(samples_file),
+             str(vcf_gz), "-o", str(vcf_gz_renamed)],
+        )
+        vcf_gz.unlink()
+        vcf_gz_renamed.rename(vcf_gz)
+        samples_file.unlink()
+
     # Indexar
     vcf_tbi = Path(str(vcf_gz) + ".tbi")
     runtime.run("bcftools", ["index", "-t", str(vcf_gz)])

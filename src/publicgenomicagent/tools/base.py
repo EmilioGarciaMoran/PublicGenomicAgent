@@ -163,6 +163,7 @@ class CallFromGraphInput(BaseModel):
     graph_xg: Path
     pack: Path
     output_vcf: Path
+    sample_name: str | None = None    # si se da, renombra SAMPLE en el VCF
 
 
 class CallFromGraphOutput(ToolOutput):

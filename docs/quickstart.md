@@ -328,22 +328,18 @@ contra un grafo local del ROI.
       --graph cohort/roi.vg \
       --xg cohort/roi.xg \
       --pack cohort/c2.pack \
-      --out cohort/c2_graph.vcf.gz
+      --out cohort/c2_graph.vcf.gz \
+      --sample-name C2
 
-Nota: vg call genera el VCF con sample "SAMPLE", no con el nombre
-del individuo. Hay que renombrarlo antes de compararlo con el calling
-lineal:
-
-    ~/.pga/envs/pga-hts/bin/bcftools view cohort/c2_graph.vcf.gz | \
-      sed "s/^\(#CHROM.*\)\tSAMPLE\$/\1\tC2/" | \
-      ~/.pga/envs/pga-hts/bin/bcftools view -Oz -o cohort/c2_graph_named.vcf.gz
-    ~/.pga/envs/pga-hts/bin/bcftools index -t cohort/c2_graph_named.vcf.gz
+Nota: vg call genera el VCF con sample "SAMPLE" por defecto. Usamos
+--sample-name C2 para que el sample coincida con el del calling lineal
+y compare-vcfs pueda emparejar las variantes.
 
 Comparamos los dos callings:
 
     ~/.pga/envs/pga-core/bin/pga tool compare-vcfs \
       --baseline cohort/c2.vcf.gz \
-      --candidate cohort/c2_graph_named.vcf.gz \
+      --candidate cohort/c2_graph.vcf.gz \
       --out cohort/delta.vcf.gz \
       --report cohort/delta.json \
       --sample C2

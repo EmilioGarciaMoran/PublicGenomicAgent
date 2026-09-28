@@ -315,6 +315,8 @@ def tool_call_from_graph(
     pack: str = typer.Option(..., "--pack", help="Pack de cobertura"),
     out: str = typer.Option(..., "--out", "-o",
                             help="VCF de salida"),
+    sample_name: str = typer.Option(None, "--sample-name",
+                                    help="Renombrar el sample del VCF (por defecto: SAMPLE)"),
 ) -> None:
     from publicgenomicagent.tools.base import CallFromGraphInput
     from publicgenomicagent.tools.local_graph import call_from_graph
@@ -324,6 +326,7 @@ def tool_call_from_graph(
         graph_xg=Path(xg),
         pack=Path(pack),
         output_vcf=Path(out),
+        sample_name=sample_name,
     )
     result = call_from_graph(_runtime(), inp)
     console.print(f"[green]OK[/green] {result.message}")
