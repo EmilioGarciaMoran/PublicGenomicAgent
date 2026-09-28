@@ -36,7 +36,7 @@ MID (Middle Eastern) para el gen NPHP1 (chr2:110,000,000-110,025,000).
 
 Salida esperada:
 
-    OK: ./cohort/cohort.vcf.gz
+    OK: cohort/cohort.vcf.gz
     SNVs: 132  SVs: 7  samples: 10
     Contig local: chr2_roi (posiciones 1..25000)
 
@@ -89,11 +89,11 @@ cobertura uniforme 30x y errores de secuenciación realistas
 
 Salida esperada:
 
-    OK: cohort/c2.bam
+    OK: /home/<user>/pga_quickstart/cohort/c2.bam
     Lecturas: 5000  Sample: C2  Contig: chr2_roi  Cobertura objetivo: 30x
-    OK: cohort/f1.bam
+    OK: /home/<user>/pga_quickstart/cohort/f1.bam
     Lecturas: 5000  Sample: F1  Contig: chr2_roi  Cobertura objetivo: 30x
-    OK: cohort/m1.bam
+    OK: /home/<user>/pga_quickstart/cohort/m1.bam
     Lecturas: 5000  Sample: M1  Contig: chr2_roi  Cobertura objetivo: 30x
 
 ## Paso 4. Extraer fenotipo del texto clínico
@@ -130,7 +130,11 @@ El fichero ./hpo/hpo_terms.json contiene:
       "terms": [...]
     }
 
-Sin GPU: usa los HPO de ejemplo manualmente (HP:0000083, HP:0004322).
+Sin GPU: usa los HPO de ejemplo manualmente. Define la variable
+HPO una vez y úsala en los comandos siguientes:
+
+    export HPO="HP:0000083,HP:0004322"
+
 El resto del tutorial funciona igual.
 
 ## Paso 5. Rankear enfermedades candidatas
@@ -326,21 +330,41 @@ contra un grafo local del ROI.
       --pack cohort/c2.pack \
       --out cohort/c2_graph.vcf.gz
 
+Nota: vg call genera el VCF con sample "SAMPLE", no con el nombre
+del individuo. Hay que renombrarlo antes de compararlo con el calling
+lineal:
+
+    ~/.pga/envs/pga-hts/bin/bcftools view cohort/c2_graph.vcf.gz | \
+      sed "s/^\(#CHROM.*\)\tSAMPLE\$/\1\tC2/" | \
+      ~/.pga/envs/pga-hts/bin/bcftools view -Oz -o cohort/c2_graph_named.vcf.gz
+    ~/.pga/envs/pga-hts/bin/bcftools index -t cohort/c2_graph_named.vcf.gz
+
 Comparamos los dos callings:
 
     ~/.pga/envs/pga-core/bin/pga tool compare-vcfs \
       --baseline cohort/c2.vcf.gz \
-      --candidate cohort/c2_graph.vcf.gz \
+      --candidate cohort/c2_graph_named.vcf.gz \
       --out cohort/delta.vcf.gz \
       --report cohort/delta.json \
       --sample C2
 
-Salida esperada (aprox.):
+Salida esperada:
 
-    OK delta.vcf.gz
-      recovered: N
-      lost: 0
-      consistent: M
+    OK /home/<user>/pga_quickstart/cohort/delta.vcf.gz
+      consistent: 18
+      discordant: 6
+      recovered: 2
+      lost: 2
+
+Interpretación:
+
+- **consistent (18)**: variantes con genotipo idéntico en ambos callings.
+- **recovered (2)**: variantes que el calling contra el grafo detecta
+  pero el calling lineal contra GRCh38 pierde. Candidatas a falsos
+  negativos por reference bias.
+- **lost (2)**: variantes detectadas por el lineal pero no por el grafo.
+- **discordant (6)**: mismo locus, genotipo distinto entre los dos
+  callings. Alelos con mapeo ambiguo a GRCh38.
 
 El grafo recupera variantes que el calling lineal pierde, y absorbe
 los alelos comunes MENA como parte de la referencia local. Ver
