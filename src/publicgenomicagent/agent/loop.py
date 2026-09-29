@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..tools.base import CaseManifest, GenomicRange
+from .planner import Planner
 from .state import AgentState, SessionContext
 
 
@@ -326,9 +327,16 @@ class AgentLoop:
     máximo. Deja traza completa en `state.tool_calls` y `state.notes`.
     """
 
-    def __init__(self, steps: list[Step] | None = None, max_steps: int = 50):
+    def __init__(
+        self,
+        steps: list[Step] | None = None,
+        max_steps: int = 50,
+        planner: Planner | None = None,
+    ):
         self.steps = steps if steps is not None else DEFAULT_STEPS
         self.max_steps = max_steps
+        # Si hay planner, decide él. Si no, se usan los steps.
+        self.planner = planner
 
     def run(self, ctx: SessionContext) -> list[StepResult]:
         results: list[StepResult] = []
@@ -352,10 +360,25 @@ class AgentLoop:
         return results
 
     def _run_one(self, ctx: SessionContext) -> StepResult | None:
-        """Ejecuta el primer step que pueda correr y no esté ya hecho.
+        """Ejecuta la siguiente acción.
 
-        Devuelve `None` si ningún step aplica.
+        Si hay `planner`, se le consulta primero. Si devuelve una
+        acción, se ejecuta vía `SessionContext.call_tool`. Si el
+        planner devuelve None, se cae a los `Step`s clásicos (útil
+        para tests y para el modo sin LLM).
+
+        Devuelve `None` si nada aplica.
         """
+        if self.planner is not None:
+            action = self.planner.next_action(ctx.state)
+            if action is not None:
+                out = ctx.call_tool(action.tool_name, **action.args)
+                return StepResult(
+                    step_name=f"planner:{action.tool_name}",
+                    tool_name=action.tool_name,
+                    output=out,
+                )
+
         for step in self.steps:
             if not step.can_run(ctx.state):
                 continue
