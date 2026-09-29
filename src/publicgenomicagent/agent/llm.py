@@ -229,6 +229,25 @@ class HttpLLMClient:
 class OllamaClient(HttpLLMClient):
     """Cliente para Ollama (`/api/generate`)."""
 
+    def __init__(
+        self,
+        endpoint: str,
+        model: str,
+        timeout: float = 120.0,
+        temperature: float = 0.0,
+        num_ctx: int = 2048,
+    ):
+        super().__init__(
+            endpoint=endpoint,
+            model=model,
+            timeout=timeout,
+            temperature=temperature,
+        )
+        # Contexto efectivo de Ollama. El prompt real de PublicGenomicAgent
+        # ronda los 800-1000 tokens; 2048 deja margen y evita que Ollama
+        # reserve 32K por defecto, lo cual penaliza la latencia y la RAM.
+        self.num_ctx = num_ctx
+
     def _build_payload(self, system: str, user: str) -> dict:
         return {
             "model": self.model,
@@ -239,7 +258,10 @@ class OllamaClient(HttpLLMClient):
             # válido. Sin esto, Qwen 7B suele devolver markdown o texto
             # libre, lo cual obliga a fallback al RuleBasedPlanner.
             "format": "json",
-            "options": {"temperature": self.temperature},
+            "options": {
+                "temperature": self.temperature,
+                "num_ctx": self.num_ctx,
+            },
         }
 
     def _extract_text(self, data: dict) -> str:

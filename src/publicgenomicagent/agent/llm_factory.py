@@ -25,6 +25,7 @@ def build_llm_client(cfg: LLMConfig) -> LLMClient:
             model=cfg.model,
             timeout=cfg.timeout_seconds,
             temperature=cfg.temperature,
+            num_ctx=cfg.num_ctx,
         )
     if provider == "llamacpp":
         return LlamaCppClient(

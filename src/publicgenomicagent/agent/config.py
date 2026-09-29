@@ -26,6 +26,7 @@ DEFAULT_CONFIG: dict = {
         "timeout_seconds": 120,
         "temperature": 0.0,
         "include_paths": False,  # privacidad por defecto
+        "num_ctx": 2048,
     }
 }
 
@@ -38,6 +39,7 @@ class LLMConfig:
     timeout_seconds: float = 120.0
     temperature: float = 0.0
     include_paths: bool = False
+    num_ctx: int = 2048
 
 
 @dataclass
@@ -67,6 +69,7 @@ def load_config(path: Path | None = None) -> AgentConfig:
         timeout_seconds=float(llm_raw.get("timeout_seconds", 120)),
         temperature=float(llm_raw.get("temperature", 0.0)),
         include_paths=bool(llm_raw.get("include_paths", False)),
+        num_ctx=int(llm_raw.get("num_ctx", 2048)),
     )
 
     # Variables de entorno pueden sobreescribir (útil para tests y CI).
