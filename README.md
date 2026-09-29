@@ -172,3 +172,11 @@ dedicado. Ver docs/phenotype_layer.md sección 14.
 ## Licencia
 
 MIT. Ver LICENSE.
+
+## Documentación
+
+- [`docs/privacy.md`](docs/privacy.md) — Política de privacidad.
+- [`docs/virtualization.md`](docs/virtualization.md) — Entornos micromamba aislados.
+- [`docs/quickstart.md`](docs/quickstart.md) — Guía de inicio rápido.
+- [`docs/use_cases.md`](docs/use_cases.md) — Casos de uso clínicos.
+- [`docs/installation.md`](docs/installation.md) — Instalación.
