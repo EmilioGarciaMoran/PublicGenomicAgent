@@ -235,6 +235,10 @@ class OllamaClient(HttpLLMClient):
             "system": system,
             "prompt": user,
             "stream": False,
+            # format=json fuerza a Ollama a restringir la salida a JSON
+            # válido. Sin esto, Qwen 7B suele devolver markdown o texto
+            # libre, lo cual obliga a fallback al RuleBasedPlanner.
+            "format": "json",
             "options": {"temperature": self.temperature},
         }
 

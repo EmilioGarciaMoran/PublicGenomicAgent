@@ -141,24 +141,51 @@ def render_state(state: AgentState, *, include_paths: bool = False) -> str:
     return "\n".join(lines)
 
 
-def render_tools_catalog() -> str:
+def render_tools_catalog(compact: bool = True) -> str:
     """Renderiza el catálogo de tools desde TOOL_REGISTRY.
 
-    Formato: JSON-lines, una tool por línea, con nombre, descripción,
-    tags, si necesita runtime, y el JSON Schema del input.
+    Por defecto, formato compacto: una línea por tool con su nombre,
+    descripción y lista de campos required + opcionales. Esto reduce
+    el prompt de ~7000 tokens a ~400, lo cual es crítico en MacAir
+    con Qwen 7B (latencia y respeto de la instrucción de JSON puro).
+
+    Con `compact=False`, vuelca el JSON Schema completo (útil solo
+    para depurar).
     """
-    out: list[str] = []
+    if not compact:
+        out: list[str] = []
+        for name in sorted(TOOL_REGISTRY):
+            spec = TOOL_REGISTRY[name]
+            entry = {
+                "name": spec.name,
+                "description": spec.description,
+                "tags": list(spec.tags),
+                "needs_runtime": spec.needs_runtime,
+                "input_schema": spec.input_schema(),
+            }
+            out.append(json.dumps(entry, ensure_ascii=False))
+        return "\n".join(out)
+
+    lines: list[str] = []
     for name in sorted(TOOL_REGISTRY):
         spec = TOOL_REGISTRY[name]
-        entry = {
-            "name": spec.name,
-            "description": spec.description,
-            "tags": list(spec.tags),
-            "needs_runtime": spec.needs_runtime,
-            "input_schema": spec.input_schema(),
-        }
-        out.append(json.dumps(entry, ensure_ascii=False))
-    return "\n".join(out)
+        schema = spec.input_schema()
+        props = schema.get("properties", {})
+        required = set(schema.get("required", []))
+        fields = []
+        for field_name, field_schema in props.items():
+            ftype = field_schema.get("type", "any")
+            if "anyOf" in field_schema:
+                # Extraer el primer tipo no-null
+                for alt in field_schema["anyOf"]:
+                    if alt.get("type") != "null":
+                        ftype = alt.get("type", "any")
+                        break
+            marker = "*" if field_name in required else ""
+            fields.append(f"{field_name}{marker}:{ftype}")
+        fields_str = ", ".join(fields)
+        lines.append(f"- {name}: {spec.description} | fields: {fields_str}")
+    return "\n".join(lines)
 
 
 def render_user_prompt(
