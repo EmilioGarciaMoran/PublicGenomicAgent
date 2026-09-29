@@ -168,20 +168,20 @@ class RuleBasedPlanner:
             return None
 
         out_dir = self._roi_dir_override or _roi_dir(state)
-        called = {
-            c.input.get("region")
+        called_pairs = {
+            (c.input.get("region"), c.input.get("bam_path"))
             for c in state.calls_of("call_variants")
             if c.ok
         }
 
         for roi in rois:
             region = _roi_region(roi)
-            if region in called:
-                continue
             # Buscamos el primer sample con sub-BAM ya disponible
             for sample in samples:
                 sub_bam = out_dir / f"{sample}.{roi.chrom}_{roi.start}_{roi.end}.bam"
                 if not sub_bam.exists():
+                    continue
+                if (region, str(sub_bam)) in called_pairs:
                     continue
                 return PlannedAction(
                     tool_name="call_variants",

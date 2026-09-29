@@ -629,7 +629,10 @@ def run_trio(
     state.references["hg38"] = Path(reference)
 
     ctx = SessionContext(state=state, runtime=_runtime())
-    loop = AgentLoop(max_steps=max_steps)
+    from publicgenomicagent.agent.planner import RuleBasedPlanner
+
+    planner = RuleBasedPlanner()
+    loop = AgentLoop(max_steps=max_steps, planner=planner)
     results = loop.run(ctx)
 
     console.print(f"[bold]Loop terminado:[/bold] {len(results)} iteraciones")

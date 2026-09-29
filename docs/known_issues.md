@@ -73,3 +73,25 @@ fix documentado en `docs/lirical_setup.md`.
 - `pdf_extract` para cargar PDFs clínicos.
 - `annotate` con VEP/snpEff.
 - Crash test de instalación desde clon limpio.
+
+## BAQ desactivado en `bcftools mpileup`
+
+`samtools`/`bcftools mpileup` aplican por defecto BAQ (Base Alignment
+Quality), que recalcula la calidad de cada base según la proximidad a
+indels. Con BAMs simulados de lecturas unpaired (flag=0, como los
+fixtures de test y los BAMs de demo), BAQ asigna calidad 0 a casi
+todas las bases, lo cual hace que `mpileup` descarte la mayoría y que
+`bcftools call` no detecte variantes.
+
+Síntoma: `samtools mpileup` devuelve `*` en la columna de bases y `0`
+en la columna de profundidad, incluso cuando hay 29 lecturas que
+cubren la posición. Con `-Q 0` sí aparecen, pero con qualidades
+falsamente bajas (`!` = Q0, `"` = Q1).
+
+Solución: usamos `-B` (sin BAQ) en `call_variants.py`. Los BAMs reales
+de secuenciación paired-end no sufren tanto, pero desactivar BAQ es
+seguro y evita falsos negativos en datos sintéticos.
+
+Ver: `tests/fixtures/make_bam_with_variant.py` genera BAMs con
+lecturas unpaired, lo cual es el caso extremo donde BAQ es más
+agresivo.
