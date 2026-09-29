@@ -539,3 +539,46 @@ def phenotype_bootstrap(
 
     result = subprocess.run(args, check=False)
     raise typer.Exit(code=result.returncode)
+
+
+# ----------------------------- registry --------------------------------
+
+@tool_app.command("list")
+def tool_list() -> None:
+    """Lista todas las tools registradas en el agente."""
+    from publicgenomicagent.tools.registry import TOOL_REGISTRY
+
+    table = Table(title="Tools registradas")
+    table.add_column("Nombre")
+    table.add_column("Runtime")
+    table.add_column("Tags")
+    table.add_column("Descripción")
+    for name, spec in sorted(TOOL_REGISTRY.items()):
+        table.add_row(
+            name,
+            "[green]sí[/green]" if spec.needs_runtime else "[dim]no[/dim]",
+            ", ".join(spec.tags),
+            spec.description,
+        )
+    console.print(table)
+
+
+@tool_app.command("describe")
+def tool_describe(
+    name: str = typer.Argument(..., help="Nombre de la tool"),
+) -> None:
+    """Muestra el esquema Pydantic de una tool."""
+    import json
+    from publicgenomicagent.tools.registry import describe_tool
+
+    try:
+        d = describe_tool(name)
+    except KeyError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(code=2)
+
+    console.print(f"[bold]{d['name']}[/bold] — {d['description']}")
+    console.print(f"needs_runtime: {d['needs_runtime']}")
+    console.print(f"tags: {', '.join(d['tags'])}")
+    console.print("\n[bold]Input schema:[/bold]")
+    console.print_json(json.dumps(d["input_schema"]))
