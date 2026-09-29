@@ -582,3 +582,67 @@ def tool_describe(
     console.print(f"tags: {', '.join(d['tags'])}")
     console.print("\n[bold]Input schema:[/bold]")
     console.print_json(json.dumps(d["input_schema"]))
+
+
+# ----------------------------- run -------------------------------------
+
+@app.command("run-trio")
+def run_trio(
+    father: str = typer.Option(..., "--father", help="BAM del padre"),
+    mother: str = typer.Option(..., "--mother", help="BAM de la madre"),
+    proband: str = typer.Option(..., "--proband", help="BAM del probando"),
+    reference: str = typer.Option(..., "--reference", "-f", help="FASTA de referencia"),
+    region: str = typer.Option(..., "--region", "-r", help="chr:start-end"),
+    case_id: str = typer.Option("trio", "--case-id"),
+    label: str = typer.Option("", "--label", help="Etiqueta del ROI (p.ej. gen)"),
+    max_steps: int = typer.Option(50, "--max-steps"),
+) -> None:
+    """Ejecuta el loop agéntico determinista sobre un trío."""
+    from publicgenomicagent.agent.loop import AgentLoop, build_trio_case
+    from publicgenomicagent.agent.state import AgentState, SessionContext
+    from publicgenomicagent.tools.base import GenomicRange
+
+    chrom, _, coords = region.partition(":")
+    start_s, _, end_s = coords.partition("-")
+    roi = GenomicRange(
+        chrom=chrom,
+        start=int(start_s),
+        end=int(end_s),
+        label=label,
+    )
+
+    case = build_trio_case(
+        case_id=case_id,
+        father_bam=Path(father),
+        mother_bam=Path(mother),
+        proband_bam=Path(proband),
+        roi=roi,
+        reference_fasta=Path(reference),
+    )
+
+    state = AgentState(case=case)
+    state.bams = {
+        "father": Path(father),
+        "mother": Path(mother),
+        "proband": Path(proband),
+    }
+    state.references["hg38"] = Path(reference)
+
+    ctx = SessionContext(state=state, runtime=_runtime())
+    loop = AgentLoop(max_steps=max_steps)
+    results = loop.run(ctx)
+
+    console.print(f"[bold]Loop terminado:[/bold] {len(results)} iteraciones")
+    for r in results:
+        if r.executed:
+            console.print(f"  [green]✓[/green] {r.step_name} → {r.tool_name}")
+        else:
+            console.print(f"  [yellow]·[/yellow] {r.step_name}: {r.skipped_reason}")
+
+    console.print("\n[bold]Notas:[/bold]")
+    for n in state.notes:
+        console.print(f"  - {n}")
+
+    out_json = Path("results") / f"{case_id}.session.json"
+    state.to_json(out_json)
+    console.print(f"\n[green]Estado guardado:[/green] {out_json}")
