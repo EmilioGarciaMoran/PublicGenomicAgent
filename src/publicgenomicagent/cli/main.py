@@ -646,3 +646,90 @@ def run_trio(
     out_json = Path("results") / f"{case_id}.session.json"
     state.to_json(out_json)
     console.print(f"\n[green]Estado guardado:[/green] {out_json}")
+
+
+# ----------------------------- llm -------------------------------------
+
+llm_app = typer.Typer(help="Cliente LLM local (Ollama / llama.cpp)")
+app.add_typer(llm_app, name="llm")
+
+
+@llm_app.command("ping")
+def llm_ping(
+    model: str = typer.Option(None, "--model", help="Override del modelo"),
+    endpoint: str = typer.Option(None, "--endpoint", help="Override del endpoint"),
+) -> None:
+    """Hace un complete trivial al LLM configurado."""
+    import time
+    from publicgenomicagent.agent.config import load_config
+    from publicgenomicagent.agent.llm_factory import build_llm_client
+
+    cfg = load_config().llm
+    if model:
+        cfg.model = model
+    if endpoint:
+        cfg.endpoint = endpoint
+
+    console.print(f"[dim]provider={cfg.provider} model={cfg.model}[/dim]")
+    console.print(f"[dim]endpoint={cfg.endpoint}[/dim]")
+
+    client = build_llm_client(cfg)
+    t0 = time.perf_counter()
+    try:
+        out = client.complete("Responde solo 'pong'.", "ping")
+    except Exception as e:  # noqa: BLE001
+        console.print(f"[red]ERROR[/red] {type(e).__name__}: {e}")
+        raise typer.Exit(code=1)
+    dt = time.perf_counter() - t0
+
+    console.print(f"[green]OK[/green] en {dt:.2f}s")
+    console.print(f"respuesta: {out[:200]}")
+
+
+@app.command("plan")
+def plan(
+    session_json: str = typer.Argument(..., help="Estado de sesión guardado"),
+    include_paths: bool = typer.Option(
+        False, "--include-paths",
+        help="Enviar rutas absolutas al LLM (privacidad: por defecto no)",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run",
+        help="Solo construir el prompt, no llamar al LLM",
+    ),
+) -> None:
+    """Carga un session.json y pide al LLMPlanner la siguiente acción."""
+    import json as _json
+    from publicgenomicagent.agent.config import load_config
+    from publicgenomicagent.agent.llm_factory import build_llm_client
+    from publicgenomicagent.agent.planner import LLMPlanner
+    from publicgenomicagent.agent.prompts import render_user_prompt
+    from publicgenomicagent.agent.state import AgentState
+
+    p = Path(session_json)
+    if not p.exists():
+        console.print(f"[red]No existe:[/red] {p}")
+        raise typer.Exit(code=2)
+
+    state = AgentState.model_validate_json(p.read_text())
+
+    if dry_run:
+        console.print(render_user_prompt(state, include_paths=include_paths))
+        raise typer.Exit(code=0)
+
+    cfg = load_config().llm
+    client = build_llm_client(cfg)
+    planner = LLMPlanner(client=client, include_paths=include_paths)
+    action = planner.next_action(state)
+
+    console.print("[bold]Acción propuesta:[/bold]")
+    if action is None:
+        console.print("  (stop)")
+    else:
+        console.print(f"  tool: {action.tool_name}")
+        console.print(f"  args: {action.args}")
+        console.print(f"  rationale: {action.rationale}")
+
+    console.print("\n[bold]Notas del planner:[/bold]")
+    for n in state.notes:
+        console.print(f"  - {n}")

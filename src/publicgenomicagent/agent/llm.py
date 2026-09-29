@@ -156,3 +156,119 @@ def parse_llm_response(raw: str) -> LLMResponse:
         stop=False,
         raw=raw,
     )
+
+
+# ---------------------------------------------------------------------------
+# Clientes HTTP (sin SDKs, solo urllib de la stdlib)
+# ---------------------------------------------------------------------------
+
+import json as _json
+import urllib.error as _urlerror
+import urllib.request as _urlreq
+
+
+class HttpLLMClient:
+    """Cliente LLM vía HTTP genérico.
+
+    El contrato es mínimo: `complete(system, user) -> str`. Cada
+    subclase concreta (Ollama, llama.cpp, ...) solo tiene que
+    sobrescribir `_build_payload` y `_extract_text`.
+
+    Usamos `urllib` de la stdlib a propósito: cero dependencias
+    nuevas para un cliente que debe poder correr en un MacAir sin
+    red, sin `pip install` adicionales.
+    """
+
+    def __init__(
+        self,
+        endpoint: str,
+        model: str,
+        timeout: float = 120.0,
+        temperature: float = 0.0,
+    ):
+        self.endpoint = endpoint
+        self.model = model
+        self.timeout = timeout
+        self.temperature = temperature
+
+    # --- API pública -----------------------------------------------------
+
+    def complete(self, system: str, user: str) -> str:
+        payload = self._build_payload(system, user)
+        body = _json.dumps(payload).encode("utf-8")
+        req = _urlreq.Request(
+            self.endpoint,
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with _urlreq.urlopen(req, timeout=self.timeout) as resp:
+                raw = resp.read().decode("utf-8")
+        except _urlerror.URLError as e:
+            raise LLMError(f"error de red con {self.endpoint}: {e}") from e
+        except TimeoutError as e:
+            raise LLMError(f"timeout tras {self.timeout}s") from e
+
+        try:
+            data = _json.loads(raw)
+        except _json.JSONDecodeError as e:
+            raise LLMError(f"respuesta no JSON: {raw[:200]}") from e
+
+        return self._extract_text(data)
+
+    # --- Hooks para subclases -------------------------------------------
+
+    def _build_payload(self, system: str, user: str) -> dict:
+        raise NotImplementedError
+
+    def _extract_text(self, data: dict) -> str:
+        raise NotImplementedError
+
+
+class OllamaClient(HttpLLMClient):
+    """Cliente para Ollama (`/api/generate`)."""
+
+    def _build_payload(self, system: str, user: str) -> dict:
+        return {
+            "model": self.model,
+            "system": system,
+            "prompt": user,
+            "stream": False,
+            "options": {"temperature": self.temperature},
+        }
+
+    def _extract_text(self, data: dict) -> str:
+        if "response" not in data:
+            raise LLMError(
+                f"respuesta de Ollama sin campo 'response': {list(data)[:5]}"
+            )
+        return data["response"]
+
+
+class LlamaCppClient(HttpLLMClient):
+    """Cliente para `llama-server` (`/completion`)."""
+
+    def _build_payload(self, system: str, user: str) -> dict:
+        # llama.cpp no tiene campo system nativo: lo concatenamos.
+        prompt = f"{system}\n\n{user}" if system else user
+        return {
+            "prompt": prompt,
+            "temperature": self.temperature,
+            "n_predict": 1024,
+            "stream": False,
+        }
+
+    def _extract_text(self, data: dict) -> str:
+        if "content" not in data:
+            raise LLMError(
+                f"respuesta de llama.cpp sin campo 'content': {list(data)[:5]}"
+            )
+        return data["content"]
+
+
+class NullLLMClient:
+    """Cliente que siempre falla. Útil para forzar fallback en tests."""
+
+    def complete(self, system: str, user: str) -> str:
+        raise LLMError("NullLLMClient: no hay backend LLM configurado")
