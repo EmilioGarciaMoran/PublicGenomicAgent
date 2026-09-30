@@ -58,7 +58,7 @@ The script `scripts/make_demo_trio.py` generates all the input
 files needed for the analysis:
 
 ```bash
-python scripts/make_demo_trio.py
+python3 scripts/make_demo_trio.py
 ```
 
 This creates the following files under `results/demo_trio/`:

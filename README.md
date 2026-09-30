@@ -117,7 +117,7 @@ Optional phenotype layer (requires GPU ≥ 20 GB or a dedicated server):
 
 ```bash
 # 1. Generate a synthetic trio with a recessive variant (chr1:1100 A>G)
-python scripts/make_demo_trio.py
+python3 scripts/make_demo_trio.py
 
 # 2. Run the full pipeline (11 automatic steps)
 pga run-trio \

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """Genera un trío sintético con un variant recesivo plantado.
 
 Caso: enfermedad autosómica recesiva.
