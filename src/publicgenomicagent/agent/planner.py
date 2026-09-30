@@ -97,6 +97,7 @@ class RuleBasedPlanner:
             self._rule_qc,
             self._rule_fetch_roi,
             self._rule_call_variants,
+            self._rule_joint_call,
             self._rule_mendelian,
         ):
             action = rule(state)
@@ -192,6 +193,75 @@ class RuleBasedPlanner:
                         "region": region,
                     },
                     rationale=f"Variant calling pendiente en {region} ({sample}).",
+                )
+        return None
+
+    def _rule_joint_call(self, state: AgentState) -> PlannedAction | None:
+        """Ejecuta `joint_call` una vez cuando los sub-BAMs del trío existen.
+
+        Precondiciones:
+          - Hay pedigree (caso familiar) y al menos 2 muestras.
+          - Existe un sub-BAM por muestra para la primera ROI.
+          - NO existe ya un VCF conjunto en state.vcfs["trio"].
+          - NO se ha ejecutado joint_call antes para esa ROI.
+
+        Si se cumplen, propone joint_call con todos los sub-BAMs del
+        ROI en una sola llamada. Eso produce un VCF multi-sample con
+        las columnas de muestra, que es lo que `mendelian_filter`
+        necesita para verificar segregación.
+        """
+        if not state.case.has_pedigree():
+            return None
+
+        # ¿Ya hay VCF conjunto?
+        if "trio" in state.vcfs:
+            return None
+
+        rois = state.case.candidate_rois
+        samples = _samples_in_case(state)
+        if not rois or len(samples) < 2:
+            return None
+
+        ref = state.references.get("hg38") or state.references.get("ref")
+        if ref is None:
+            return None
+
+        out_dir = self._roi_dir_override or _roi_dir(state)
+
+        # Buscar la primera ROI con sub-BAMs para todos los samples
+        for roi in rois:
+            region = _roi_region(roi)
+            sub_bams: list[tuple[str, Path]] = []
+            for sample in samples:
+                sub_bam = out_dir / f"{sample}.{roi.chrom}_{roi.start}_{roi.end}.bam"
+                if not sub_bam.exists():
+                    break
+                sub_bams.append((sample, sub_bam))
+            else:
+                # Todos los samples tienen sub-BAM para esta ROI.
+                # ¿Se ha ejecutado joint_call para esta ROI?
+                joint_calls = [
+                    c for c in state.calls_of("joint_call") if c.ok
+                ]
+                region_done = any(
+                    c.input.get("region") == region for c in joint_calls
+                )
+                if region_done:
+                    continue
+
+                out_vcf = out_dir / f"joint_{roi.chrom}_{roi.start}_{roi.end}.vcf.gz"
+                return PlannedAction(
+                    tool_name="joint_call",
+                    args={
+                        "bams": sub_bams,
+                        "reference_fasta": ref,
+                        "output_vcf": out_vcf,
+                        "region": region,
+                    },
+                    rationale=(
+                        f"Hay {len(sub_bams)} sub-BAMs del trío en {region}; "
+                        f"generamos VCF conjunto para filtrar por mendelismo."
+                    ),
                 )
         return None
 

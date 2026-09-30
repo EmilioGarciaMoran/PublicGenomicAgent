@@ -314,3 +314,99 @@ def test_llm_planner_sends_paths_when_explicitly_enabled():
 
     user_prompt = client.calls[0]["user"]
     assert "/home/hospital/" in user_prompt
+
+# ---------------------------------------------------------------------------
+# RuleBasedPlanner: joint_call
+# ---------------------------------------------------------------------------
+
+def test_rule_joint_call_after_all_sub_bams_exist(tmp_path: Path):
+    """Cuando los 3 sub-BAMs existen, el planner propone joint_call."""
+    state = AgentState(case=_trio_case())
+    state.bams = {
+        "father": Path("/tmp/f.bam"),
+        "mother": Path("/tmp/m.bam"),
+        "proband": Path("/tmp/p.bam"),
+    }
+    state.references["hg38"] = tmp_path / "ref.fa"
+
+    # Simulamos que los 3 sub-BAMs ya existen en disco
+    roi_dir = tmp_path / "roi"
+    roi_dir.mkdir()
+    for sample in ["father", "mother", "proband"]:
+        (roi_dir / f"{sample}.chr1_1_100.bam").write_bytes(b"")
+
+    p = RuleBasedPlanner(roi_dir=roi_dir)
+    # Saltamos la regla de QC registrando los qc_bam ya hechos
+    for sample in ["father", "mother", "proband"]:
+        state.record(
+            tool_name="qc_bam",
+            inp={"bam_path": f"/tmp/{sample[0]}.bam"},
+            out={"ok": True},
+            duration_ms=1,
+        )
+    # Saltamos fetch_roi registrándolos
+    for sample in ["father", "mother", "proband"]:
+        state.record(
+            tool_name="fetch_roi",
+            inp={
+                "bam_path": f"/tmp/{sample[0]}.bam",
+                "region": "chr1:1-100",
+                "output_bam": str(roi_dir / f"{sample}.chr1_1_100.bam"),
+            },
+            out={"ok": True},
+            duration_ms=1,
+        )
+    # Saltamos call_variants registrándolos
+    for sample in ["father", "mother", "proband"]:
+        state.record(
+            tool_name="call_variants",
+            inp={
+                "region": "chr1:1-100",
+                "bam_path": str(roi_dir / f"{sample}.chr1_1_100.bam"),
+            },
+            out={"ok": True},
+            duration_ms=1,
+        )
+
+    action = p.next_action(state)
+    assert action is not None
+    assert action.tool_name == "joint_call"
+    assert len(action.args["bams"]) == 3
+
+
+def test_rule_joint_call_skipped_when_trio_vcf_exists(tmp_path: Path):
+    """Si ya hay VCF conjunto, el planner no propone joint_call."""
+    state = AgentState(case=_trio_case())
+    state.bams = {
+        "father": Path("/tmp/f.bam"),
+        "mother": Path("/tmp/m.bam"),
+        "proband": Path("/tmp/p.bam"),
+    }
+    state.references["hg38"] = tmp_path / "ref.fa"
+    state.vcfs["trio"] = tmp_path / "trio.vcf.gz"
+
+    p = RuleBasedPlanner(roi_dir=tmp_path / "roi")
+    # No registramos QC/fetch/call: la regla joint_call debe devolver None
+    # porque ya hay trio en state.vcfs
+    # Pero las reglas previas (QC, fetch_roi, call_variants) sí propondrán.
+    # Verificamos que ninguna acción sea joint_call.
+    for _ in range(5):
+        action = p.next_action(state)
+        if action is None:
+            break
+        assert action.tool_name != "joint_call"
+
+
+def test_rule_joint_call_requires_pedigree(tmp_path: Path):
+    """Sin pedigree no hay joint_call."""
+    state = AgentState(case=_case_with_roi())  # no trio
+    state.bams = {"proband": Path("/tmp/p.bam")}
+    state.references["hg38"] = tmp_path / "ref.fa"
+
+    p = RuleBasedPlanner(roi_dir=tmp_path / "roi")
+    action = p.next_action(state)
+    # Ninguna acción debe ser joint_call (no hay pedigree)
+    while action is not None:
+        assert action.tool_name != "joint_call"
+        break
+

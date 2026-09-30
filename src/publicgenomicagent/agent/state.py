@@ -274,6 +274,12 @@ def _register_side_effects(state: AgentState, tool_name: str, out: ToolOutput) -
     elif tool_name == "align_to_graph":
         if d.get("pack"):
             state.artifacts["pack"] = Path(d["pack"])
+    elif tool_name == "joint_call":
+        # El VCF conjunto se indexa con la clave "trio", que es la
+        # que `_rule_mendelian` del planner busca. Es el único VCF
+        # que contiene las 3 muestras en columnas separadas.
+        if "output_vcf" in d:
+            state.vcfs["trio"] = Path(d["output_vcf"])
     elif tool_name == "call_from_graph":
         if "vcf" in d:
             label = _logical_label(d["vcf"])
