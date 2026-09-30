@@ -165,3 +165,69 @@ def test_session_context_invalid_input_is_recorded():
     rec = state.tool_calls[0]
     assert rec.ok is False
     assert "input validation failed" in (rec.error or "")
+
+
+# ---------------------------------------------------------------------------
+# Privacidad: las claves de vcfs/artifacts no contienen rutas absolutas
+# ---------------------------------------------------------------------------
+
+def test_side_effects_use_logical_labels(tmp_path: Path):
+    """Los efectos colaterales indexan etiquetas, no rutas."""
+    state = AgentState(case=_minimal_case())
+    ctx = SessionContext(state=state, runtime=None)
+
+    # Simulamos el efecto colateral de un fetch_roi y un call_variants
+    from publicgenomicagent.tools.base import FetchROIOutput, CallVariantsOutput
+    from publicgenomicagent.agent.state import _register_side_effects
+
+    roi_out = FetchROIOutput(
+        ok=True,
+        tool="fetch_roi",
+        message="",
+        outputs={},
+        output_bam=tmp_path / "father.chr1_1000_1200.bam",
+        output_bai=tmp_path / "father.chr1_1000_1200.bam.bai",
+        bytes_written=123,
+    )
+    _register_side_effects(state, "fetch_roi", roi_out)
+
+    cv_out = CallVariantsOutput(
+        ok=True,
+        tool="call_variants",
+        message="",
+        outputs={},
+        output_vcf=tmp_path / "father.chr1_1000_1200.vcf.gz",
+        output_tbi=tmp_path / "father.chr1_1000_1200.vcf.gz.tbi",
+        variants_total=1,
+        variants_passing=1,
+    )
+    _register_side_effects(state, "call_variants", cv_out)
+
+    # Las claves deben ser etiquetas lógicas, no rutas
+    artifact_keys = list(state.artifacts.keys())
+    vcf_keys = list(state.vcfs.keys())
+
+    assert any("roi_bam:father" == k for k in artifact_keys), artifact_keys
+    assert any("called:father" == k for k in vcf_keys), vcf_keys
+
+    # Y ninguna clave debe contener "/"
+    for k in artifact_keys + vcf_keys:
+        assert "/" not in k, f"clave con ruta absoluta: {k}"
+
+
+def test_render_state_sanitizes_keys(tmp_path: Path):
+    """Si una clave contiene una ruta (por un bug futuro), render_state la limpia."""
+    from publicgenomicagent.agent.prompts import render_state
+
+    state = AgentState(case=_minimal_case())
+    # Inyectamos una clave con ruta absoluta directamente
+    state.artifacts["roi_bam:/home/hospital/paciente_1234.exoma.bam"] = (
+        tmp_path / "x.bam"
+    )
+
+    out = render_state(state, include_paths=False)
+
+    # El prompt NO debe contener la ruta del hospital
+    assert "/home/hospital/" not in out
+    # Pero sí el basename
+    assert "paciente_1234.exoma.bam" in out

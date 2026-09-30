@@ -195,31 +195,90 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
+def _logical_label(path: str | Path) -> str:
+    """Extrae una etiqueta lógica legible de un path.
+
+    Ejemplos:
+      /r/roi/father.chr1_1000_1200.vcf.gz  -> father
+      /r/roi/proband.chr1_1000_1200.bam    -> proband
+      /r/graph.vg                          -> graph
+      /r/pack.pack                         -> pack
+
+    Estrategia:
+      1. Tomar el basename.
+      2. Quitar la extensión compuesta (.vcf.gz, .bam.bai, .bam, .vg, ...).
+      3. Cortar por "." y devolver el primer trozo.
+
+    Nota: el corte por "." asume que el primer componente del nombre
+    es el identificador lógico (father, proband, graph, pack). Si en
+    el futuro un nombre de fichero legítimamente empieza por puntos
+    (p. ej. "sample.s1.ROI.bam" donde sample.s1 es la etiqueta),
+    habría que ajustar esta función. Hoy por hoy el prefijo es
+    siempre el sample ID o el tipo de artefacto.
+    """
+    name = Path(str(path)).name
+    # Quitar extensiones compuestas y simples.
+    for suffix in (
+        ".vcf.gz.tbi",
+        ".vcf.gz",
+        ".bam.bai",
+        ".cram.crai",
+        ".bam",
+        ".cram",
+        ".vcf",
+        ".bcf",
+        ".vg",
+        ".xg",
+        ".pack",
+        ".gam",
+        ".fa",
+        ".fai",
+    ):
+        if name.endswith(suffix):
+            name = name[: -len(suffix)]
+            break
+    else:
+        # Sin extensión conocida: quitar solo el último componente
+        if "." in name:
+            name = name.rsplit(".", 1)[0]
+    # Primer trozo del nombre separado por "."
+    return name.split(".")[0]
+
+
 def _register_side_effects(state: AgentState, tool_name: str, out: ToolOutput) -> None:
     """Indexa rutas producidas por tools en el estado de la sesión.
 
-    Evita que el loop agéntico tenga que recordar dónde quedó cada
-    artefacto. Sólo registramos convenciones bien definidas.
+    Las CLAVES son etiquetas lógicas (p. ej. "called:father"), no rutas
+    absolutas. Esto es deliberado: las claves se envían al LLM en
+    `render_state`, y no deben filtrar directorios clínicos.
+
+    Los VALORES sí son Path absolutos, porque el propio agente los
+    necesita para ejecutar tools. La sanitización de valores ocurre
+    en `render_state` (a basename) salvo que include_paths=True.
     """
     d = out.model_dump(mode="json") if hasattr(out, "model_dump") else {}
 
     if tool_name == "fetch_roi":
         if "output_bam" in d:
-            state.artifacts[f"roi_bam:{d.get('output_bam')}"] = Path(d["output_bam"])
+            label = _logical_label(d["output_bam"])
+            state.artifacts[f"roi_bam:{label}"] = Path(d["output_bam"])
     elif tool_name == "call_variants":
         if "output_vcf" in d:
-            state.vcfs[f"called:{d['output_vcf']}"] = Path(d["output_vcf"])
+            label = _logical_label(d["output_vcf"])
+            state.vcfs[f"called:{label}"] = Path(d["output_vcf"])
     elif tool_name == "build_local_graph":
         if "graph_vg" in d:
-            state.artifacts[f"graph_vg:{d['graph_vg']}"] = Path(d["graph_vg"])
+            state.artifacts["graph_vg"] = Path(d["graph_vg"])
         if "graph_xg" in d:
-            state.artifacts[f"graph_xg:{d['graph_xg']}"] = Path(d["graph_xg"])
+            state.artifacts["graph_xg"] = Path(d["graph_xg"])
     elif tool_name == "align_to_graph":
         if d.get("pack"):
-            state.artifacts[f"pack:{d['pack']}"] = Path(d["pack"])
+            state.artifacts["pack"] = Path(d["pack"])
     elif tool_name == "call_from_graph":
         if "vcf" in d:
-            state.vcfs[f"graph_called:{d['vcf']}"] = Path(d["vcf"])
+            label = _logical_label(d["vcf"])
+            state.vcfs[f"graph_called:{label}"] = Path(d["vcf"])
     elif tool_name == "local_pangenome":
         if "enriched_fasta" in d:
-            state.references[f"enriched:{d['enriched_fasta']}"] = Path(d["enriched_fasta"])
+            label = _logical_label(d["enriched_fasta"])
+            state.references[f"enriched:{label}"] = Path(d["enriched_fasta"])

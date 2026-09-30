@@ -68,6 +68,29 @@ def _basename(p: Any) -> str:
         return str(p)
 
 
+def _key(k: Any, *, include_paths: bool = False) -> str:
+    """Sanea una CLAVE del estado.
+
+    Las claves del estado son etiquetas lógicas del tipo
+    "called:father" o "roi_bam:proband". Si por algún motivo una clave
+    contiene una ruta absoluta (p. ej. por un _register_side_effects
+    antiguo), este helper la reduce a "prefijo:basename" antes de
+    enviarla al LLM.
+
+    Con `include_paths=True` se respeta la clave tal cual.
+    """
+    s = str(k)
+    if include_paths:
+        return s
+    if "/" not in s:
+        return s
+    prefix, sep, rest = s.partition(":")
+    if not sep:
+        # Clave sin prefijo que contiene "/": reducir a basename
+        return _basename(s)
+    return f"{prefix}:{_basename(rest)}"
+
+
 def render_state(state: AgentState, *, include_paths: bool = False) -> str:
     """Serializa el estado a un bloque de texto compacto para el LLM.
 
@@ -79,6 +102,9 @@ def render_state(state: AgentState, *, include_paths: bool = False) -> str:
 
     def _path(v: Any) -> str:
         return str(v) if include_paths else _basename(v)
+
+    def _safe_key(k: Any) -> str:
+        return _key(k, include_paths=include_paths)
 
     lines: list[str] = []
     lines.append(f"case_id: {case.case_id}")
@@ -117,19 +143,19 @@ def render_state(state: AgentState, *, include_paths: bool = False) -> str:
     if state.bams:
         lines.append("bams:")
         for sample, p in state.bams.items():
-            lines.append(f"  - {sample}: {_path(p)}")
+            lines.append(f"  - {_safe_key(sample)}: {_path(p)}")
     if state.vcfs:
         lines.append("vcfs:")
         for label, p in state.vcfs.items():
-            lines.append(f"  - {label}: {_path(p)}")
+            lines.append(f"  - {_safe_key(label)}: {_path(p)}")
     if state.references:
         lines.append("references:")
         for label, p in state.references.items():
-            lines.append(f"  - {label}: {_path(p)}")
+            lines.append(f"  - {_safe_key(label)}: {_path(p)}")
     if state.artifacts:
         lines.append("artifacts:")
         for label, p in state.artifacts.items():
-            lines.append(f"  - {label}: {_path(p)}")
+            lines.append(f"  - {_safe_key(label)}: {_path(p)}")
 
     # Historial de tools (resumido, sin argumentos completos)
     if state.tool_calls:
