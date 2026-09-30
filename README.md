@@ -224,7 +224,7 @@ Usage guides:
 
 Reproducible demos:
 
-- [`docs/demo_ksa001_trio.md`](docs/demo_ksa001_trio.md) — synthetic recessive trio (reproducible).
+- [`docs/demo_trio_recessive.md`](docs/demo_trio_recessive.md) — synthetic recessive trio (reproducible).
 - [`docs/demo_nphp1.md`](docs/demo_nphp1.md) — linear analysis on NPHP1.
 - [`docs/demo_nphp1_graph.md`](docs/demo_nphp1_graph.md) — linear vs. graph.
 - [`docs/demo_nphp1_mena.md`](docs/demo_nphp1_mena.md) — graph recovers MENA SNVs.
