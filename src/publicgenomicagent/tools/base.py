@@ -80,6 +80,31 @@ class CallVariantsOutput(ToolOutput):
     variants_passing: int
 
 
+# --- joint_call -------------------------------------------------------
+
+class JointCallInput(BaseModel):
+    """Variant calling conjunto (multi-sample) sobre N BAMs.
+
+    Cada elemento de `bams` es (sample_name, bam_path). El sample_name
+    debe coincidir con el campo SM del header del BAM, porque
+    bcftools mpileup usa ese campo para nombrar las columnas del VCF.
+    """
+    bams: list[tuple[str, Path]]
+    reference_fasta: Path
+    output_vcf: Path
+    region: str | None = None
+    min_qual: int = 20
+    ploidy: int = 2
+
+
+class JointCallOutput(ToolOutput):
+    output_vcf: Path
+    output_tbi: Path
+    variants_total: int
+    variants_passing: int
+    samples: list[str] = []
+
+
 # --- compare_vcfs ------------------------------------------------------
 
 class CompareVCFsInput(BaseModel):

@@ -23,6 +23,7 @@ EXPECTED_TOOLS = {
     "fetch_roi",
     "qc_bam",
     "call_variants",
+    "joint_call",
     "compare_vcfs",
     "local_pangenome",
     "build_local_graph",

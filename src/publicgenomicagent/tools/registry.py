@@ -32,6 +32,8 @@ from .base import (
     CallVariantsOutput,
     CompareVCFsInput,
     CompareVCFsOutput,
+    JointCallInput,
+    JointCallOutput,
     ExtractHPOInput,
     ExtractHPOOutput,
     FetchROIInput,
@@ -48,7 +50,7 @@ from .base import (
     QCBamOutput,
     ToolOutput,
 )
-from .call_variants import call_variants
+from .call_variants import call_variants, joint_call
 from .compare_vcfs import compare_vcfs
 from .extract_hpo import extract_hpo
 from .fetch_roi import fetch_roi
@@ -107,6 +109,15 @@ TOOL_REGISTRY: dict[str, ToolSpec] = {
         needs_runtime=True,
         description="Variant calling sobre un sub-BAM (bcftools mpileup+call).",
         tags=("hts", "variants"),
+    ),
+    "joint_call": ToolSpec(
+        name="joint_call",
+        func=joint_call,
+        input_model=JointCallInput,
+        output_model=JointCallOutput,
+        needs_runtime=True,
+        description="Variant calling conjunto (multi-sample) sobre N BAMs.",
+        tags=("hts", "variants", "family"),
     ),
     "compare_vcfs": ToolSpec(
         name="compare_vcfs",
