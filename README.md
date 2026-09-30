@@ -1,182 +1,245 @@
 # PublicGenomicAgent
 
-Agente genómico **clínico** conversacional, quirúrgico y virtualizado.
+**A clinical-grade, privacy-first conversational agent for genomic analysis.**
 
-Dado un fenotipo, una familia y BAMs ya alineados, analiza solo las
-regiones relevantes (ROIs) y devuelve un VCF delta con variantes
-candidatas priorizadas. Optimizado para hardware modesto: portátiles,
-discos externos, sin clúster.
+Given a clinical phenotype, a family structure, and pre-aligned BAMs,
+PublicGenomicAgent analyzes only the relevant regions of interest (ROIs)
+and returns a prioritized variant report — with Mendelian statistics,
+local pangenomization, and a fully auditable execution trace.
 
-## Qué es esto
+Designed for modest hardware: laptops, external drives, no cluster.
+Air-gapped capable.
 
-PublicGenomicAgent no es un pipeline. Un pipeline produce ficheros;
-este sistema produce decisiones.
+---
 
-Entrada: un BAM ya alineado + una consulta clínica (fenotipo,
-familia, sospecha diagnóstica) + opcionalmente un texto clínico.
+## What this is
 
-Salida: una decisión cuantificada sobre variantes candidatas,
-con estadística mendeliana, pangenomización local, y trazabilidad
-completa del proceso.
+PublicGenomicAgent is **not a pipeline**. A pipeline produces files.
+This system produces *decisions*.
 
-El VCF es el lenguaje intermedio. La decisión es el producto.
+- **Input**: a pre-aligned BAM + a clinical query (phenotype, family,
+  diagnostic suspicion) + optionally free-text clinical notes.
+- **Output**: a quantified decision over candidate variants, with
+  Mendelian segregation, local pangenomization, and complete
+  traceability.
 
-## Enfoque: clínico, no genómico
+The VCF is the intermediate language. The decision is the product.
 
-| Aspecto | Pipeline genómico | PublicGenomicAgent |
+## Approach: clinical, not genomic
+
+| Aspect | Genomic pipeline | PublicGenomicAgent |
 |---|---|---|
-| Punto de partida | FASTQ / exoma completo | BAM + fenotipo |
-| Scope | Todo el genoma | ROI dirigido por clínica |
-| Tiempo por caso | Horas | Segundos por ROI |
-| Salida | VCF exhaustivo | VCF delta priorizado |
-| Usuario | Bioinformático | Genetista clínico |
-| Validación | Sensibilidad global | Utilidad diagnóstica |
+| Starting point | FASTQ / whole exome | BAM + phenotype |
+| Scope | Whole genome | Clinical-driven ROI |
+| Time per case | Hours | Seconds per ROI |
+| Output | Exhaustive VCF | Prioritized delta VCF |
+| User | Bioinformatician | Clinical geneticist |
+| Validation | Global sensitivity | Diagnostic utility |
 
-## No alineamos
+## We do not align
 
-El sistema empieza con **BAMs ya alineados** a hg38, producidos por
-vuestro pipeline habitual (DRAGEN, BWA+GATK, minimap2, etc.).
-Asumimos que el trabajo pesado de alineamiento ya está hecho, en
-servidor o en cloud.
+The system starts with **BAMs already aligned to hg38**, produced by
+your existing pipeline (DRAGEN, BWA+GATK, minimap2, etc.). We assume
+the heavy alignment work is already done, on a server or in the cloud.
 
-El valor del sistema está en la capa clínica: interpretación dirigida
-por fenotipo sobre BAMs existentes, con pangenomización local para
-corregir el reference bias poblacional.
+The value is in the clinical layer: phenotype-driven interpretation
+on existing BAMs, with local pangenomization to correct for population
+reference bias.
+
+## Privacy by architecture
+
+Three guarantees, each verified by tests:
+
+1. **No patient data leaves the machine.** The default LLM is Ollama
+   running on `localhost`. Analysis tools (samtools, bcftools, vg,
+   plink) run against local binaries in isolated micromamba environments.
+2. **No absolute paths are sent to the LLM.** The planner prompt
+   contains basenames only (`proband.bam`), never
+   `/home/hospital/patient_1234.exome.bam`.
+3. **No secrets in config files.** `~/.pga/config.yaml` never holds
+   API keys. If a remote provider is added later, credentials go
+   through environment variables.
+
+See [`docs/privacy.md`](docs/privacy.md) for the full policy.
 
 ## Pipeline
 
-Texto clínico
+```
+Clinical text
     ↓
-extract_hpo (RDMA, GPU)  →  HPO terms
+extract_hpo (RDMA, GPU optional)  →  HPO terms
     ↓
-phenotype_ranking (LIRICAL, CPU)  →  enfermedades rankeadas
+phenotype_ranking (LIRICAL, CPU)  →  ranked diseases
     ↓
-fetch_roi → qc → call_variants → local_pangenome → build_local_graph
+fetch_roi → qc_bam → call_variants → joint_call → mendelian_filter
     ↓
-mendelian_filter → plink_validate
+local_pangenome → build_local_graph → align_to_graph → call_from_graph
     ↓
-compare_vcfs → delta
+compare_vcfs → prioritized delta
+```
 
-Cada paso es una tool del CLI. Todas son deterministas, auditables
-y se pueden encadenar.
+Each step is a tool of the CLI. All are deterministic, auditable, and
+composable. A local LLM (Ollama or llama.cpp) can orchestrate them
+through `LLMPlanner`, with a deterministic `RuleBasedPlanner` fallback
+when the LLM hallucinates a tool or an argument.
 
-## Instalación
+## Quickstart
 
-Requisitos:
-- Linux o macOS
-- micromamba en PATH
-- Java 17+ (para LIRICAL)
-- Opcional: GPU NVIDIA ≥20 GB (para extracción HPO con RDMA)
+### Install
 
-### Bootstrap desde cero
+Requires Linux or macOS, `micromamba` in PATH.
 
-    git clone https://github.com/EmilioGarciaMoran/PublicGenomicAgent
-    cd PublicGenomicAgent
+```bash
+git clone https://github.com/EmilioGarciaMoran/PublicGenomicAgent
+cd PublicGenomicAgent
 
-    # 1. Crear el entorno base (una sola vez)
-    micromamba create -y -p ~/.pga/envs/pga-core -f envs/pga-core.yml
-    micromamba run -p ~/.pga/envs/pga-core pip install -e .
+# 1. Create the base environment (once)
+micromamba create -y -p ~/.pga/envs/pga-core -f envs/pga-core.yml
+micromamba run -p ~/.pga/envs/pga-core pip install -e .
 
-    # 2. Crear los entornos de herramientas
-    ~/.pga/envs/pga-core/bin/pga env bootstrap pga-hts
-    ~/.pga/envs/pga-core/bin/pga env bootstrap pga-pangenome
-    ~/.pga/envs/pga-core/bin/pga env bootstrap pga-mendelian
-    ~/.pga/envs/pga-core/bin/pga env bootstrap pga-phenotype
+# 2. Create the tool environments
+~/.pga/envs/pga-core/bin/pga env bootstrap pga-hts
+~/.pga/envs/pga-core/bin/pga env bootstrap pga-pangenome
+~/.pga/envs/pga-core/bin/pga env bootstrap pga-mendelian
 
-    # 3. Bootstrap de la capa de fenotipo (datos de RDMA + LIRICAL)
-    ~/.pga/envs/pga-core/bin/pga phenotype bootstrap
+# 3. Verify
+~/.pga/envs/pga-core/bin/pga env verify
+```
 
-    # 4. Verificar
-    ~/.pga/envs/pga-core/bin/pga env verify
+Optional phenotype layer (requires GPU ≥ 20 GB or a dedicated server):
 
-Con eso el sistema está operativo. Ver docs/installation.md para
-detalles y solución de problemas.
+```bash
+~/.pga/envs/pga-core/bin/pga env bootstrap pga-phenotype
+~/.pga/envs/pga-core/bin/pga phenotype bootstrap
+```
 
-## Uso rápido
+### Run a trio analysis end-to-end
 
-### Capa genómica (sin GPU)
+```bash
+# 1. Generate a synthetic trio with a recessive variant (chr1:1100 A>G)
+python scripts/make_demo_trio.py
 
-    pga tool fetch-roi --bam patient.bam --region chr2:110000000-110025000 --out roi.bam
-    pga tool qc --bam roi.bam --level counts --expected-sample PAT001
-    pga tool call-variants --bam roi.bam --reference hg38_roi.fa --out patient.vcf.gz
-    pga tool mendelian-filter --vcf trio.vcf.gz --pedigree-fam trio.fam --proband C2
+# 2. Run the full pipeline (11 automatic steps)
+pga run-trio \
+    --father results/demo_trio/father.bam \
+    --mother results/demo_trio/mother.bam \
+    --proband results/demo_trio/proband.bam \
+    --reference results/demo_trio/ref.fa \
+    --region chr1:1000-1200 \
+    --case-id DEMO_TRIO --label DEMO1
+```
 
-### Capa de fenotipo
+Output: `results/DEMO_TRIO.session.json` with 11 traced tool calls,
+including `joint_call` and `mendelian_filter`. The variant is classified
+as `auto_rec_hom` (autosomal recessive homozygous) with genotypes
+`father=0/1`, `mother=0/1`, `proband=1/1`.
 
-    # Extracción de HPO desde texto (requiere GPU ≥20 GB)
-    pga tool extract-hpo --text "patient with renal failure" --out ./hpo
+For a longer walkthrough, see [`docs/quickstart.md`](docs/quickstart.md).
 
-    # Priorización de enfermedades desde HPO (solo CPU)
-    pga tool phenotype-ranking --hpo "HP:0000083,HP:0004322" --out ./rank
+## Tools
 
-### Pangenomización local
+13 tools registered in `TOOL_REGISTRY`, all with Pydantic input/output
+and deterministic execution:
 
-    pga tool local-pangenome --cohort cohort.vcf.gz --reference hg38_roi.fa \
-      --region chr2_roi:1-25000 --out ./enriched --min-af 0.05
+| Tool | Description | Runtime |
+|---|---|---|
+| `fetch_roi` | Slice an indexed BAM by genomic region | yes |
+| `qc_bam` | Structural QC: header, index, sort order, samples, counts | yes |
+| `call_variants` | Single-sample variant calling (bcftools mpileup+call) | yes |
+| `joint_call` | Multi-sample variant calling for families | yes |
+| `mendelian_filter` | De novo / recessive homozygous / dominant / X-linked | no |
+| `plink_validate` | PLINK-based family QC (Mendel errors, IBD) | no |
+| `compare_vcfs` | Diff two VCFs with sensitivity/precision metrics | no |
+| `local_pangenome` | Enrich a local reference with cohort alleles | no |
+| `build_local_graph` | Build a vg graph from reference + cohort VCF | yes |
+| `align_to_graph` | Align reads against a vg graph (vg giraffe) | yes |
+| `call_from_graph` | Call variants from graph + pack (vg call) | yes |
+| `extract_hpo` | Extract HPO terms from clinical text (RDMA) | no |
+| `phenotype_ranking` | LIRICAL-based candidate ranking from HPO ± VCF | no |
 
-    pga tool build-local-graph --reference hg38_roi.fa \
-      --cohort cohort.vcf.gz --out roi.vg
+List them from the CLI:
 
-    pga tool compare-vcfs --baseline patient_grch38.vcf.gz \
-      --candidate patient_pga.vcf.gz --out delta.vcf.gz --report delta.json
+```bash
+pga tool list
+pga tool describe fetch_roi
+```
 
-Ver docs/quickstart.md para un ejemplo end-to-end con el fixture
-NPHP1 (trío con fallo renal y enanismo).
+## Virtualization
 
-## Estructura
+One micromamba environment per tool family. No shared binaries, no
+global installs, no zombie dependencies. Manifest hashes are verified
+on every bootstrap; if a manifest changes, the environment is rebuilt
+from scratch.
 
-    envs/         manifiestos y registry de entornos
-    src/          código del paquete publicgenomicagent
-    docs/         documentación de diseño
-    tests/        tests unitarios e integración
-    scripts/      scripts de bootstrap y utilidades
+```bash
+pga env list       # show declared environments
+pga env bootstrap  # create one (idempotent)
+pga env verify     # check binaries and versions
+```
 
-## Documentación
+See [`docs/virtualization.md`](docs/virtualization.md).
 
-Diseño conceptual:
+## Tests
 
-- docs/virtualization.md — capa de entornos aislados.
-- docs/local_pangenome.md — núcleo: pangenomización local.
-- docs/decision_not_pipeline.md — por qué es distinto.
-- docs/mendelian_segregation.md — la genética clínica como lógica.
-- docs/phenotype_layer.md — capa de fenotipo.
-- docs/audit_and_training.md — sesiones registradas y formación.
+```bash
+pytest tests/unit/         # 65 unit tests, no environment needed
+pytest tests/integration/  # 30 integration tests, requires micromamba
+```
 
-Guías de uso:
+The integration test `tests/integration/test_demo_trio.py` runs the
+full pipeline on a synthetic recessive trio and verifies the exact
+`auto_rec_hom` classification. It is the regression net for the whole
+system.
 
-- docs/installation.md — instalación detallada y troubleshooting.
-- docs/quickstart.md — ejemplo end-to-end.
-- docs/use_cases.md — cuatro escenarios de uso.
+## Project structure
 
-Demos reproducibles:
+```
+envs/         manifests and registry of micromamba environments
+src/          publicgenomicagent Python package
+scripts/      bootstrap and demo utilities
+docs/         design notes and reproducible demos
+tests/        unit and integration test suites
+results/      generated outputs (git-ignored)
+data/         user data (git-ignored)
+```
 
-- docs/demo_nphp1.md — experimento lineal.
-- docs/demo_nphp1_graph.md — comparación lineal vs grafo.
-- docs/demo_nphp1_mena.md — grafo recupera SNVs MENA.
-- docs/demo_nphp1_trio.md — joint calling del trío.
+## Documentation
 
-Setup de herramientas externas:
+Design notes:
 
-- docs/lirical_setup.md — instalación y bug conocido.
+- [`docs/virtualization.md`](docs/virtualization.md) — isolated environments.
+- [`docs/local_pangenome.md`](docs/local_pangenome.md) — local pangenomization.
+- [`docs/decision_not_pipeline.md`](docs/decision_not_pipeline.md) — why this is different.
+- [`docs/mendelian_segregation.md`](docs/mendelian_segregation.md) — clinical genetics as logic.
+- [`docs/phenotype_layer.md`](docs/phenotype_layer.md) — HPO extraction and ranking.
+- [`docs/audit_and_training.md`](docs/audit_and_training.md) — session logging.
 
-## Estado
+Usage guides:
 
-En desarrollo activo. 12 tools funcionales, 5 entornos aislados,
-26 tests verdes.
+- [`docs/installation.md`](docs/installation.md) — detailed setup and troubleshooting.
+- [`docs/quickstart.md`](docs/quickstart.md) — end-to-end walkthrough.
+- [`docs/use_cases.md`](docs/use_cases.md) — four clinical scenarios.
+- [`docs/privacy.md`](docs/privacy.md) — privacy policy.
+- [`docs/known_issues.md`](docs/known_issues.md) — known issues (BAQ, etc.).
 
-Capa genómica (sin GPU): completa.
+Reproducible demos:
 
-Capa de fenotipo (extracción HPO): requiere GPU ≥20 GB o servidor
-dedicado. Ver docs/phenotype_layer.md sección 14.
+- [`docs/demo_ksa001_trio.md`](docs/demo_ksa001_trio.md) — synthetic recessive trio (reproducible).
+- [`docs/demo_nphp1.md`](docs/demo_nphp1.md) — linear analysis on NPHP1.
+- [`docs/demo_nphp1_graph.md`](docs/demo_nphp1_graph.md) — linear vs. graph.
+- [`docs/demo_nphp1_mena.md`](docs/demo_nphp1_mena.md) — graph recovers MENA SNVs.
+- [`docs/demo_nphp1_trio.md`](docs/demo_nphp1_trio.md) — joint calling of a trio.
 
-## Licencia
+## Status
 
-MIT. Ver LICENSE.
+**Active development. 13 tools, 5 isolated environments, 95 tests passing.**
 
-## Documentación
+- Genomic layer (no GPU): complete and tested end-to-end.
+- LLM orchestration (Ollama local): functional, with deterministic fallback.
+- Phenotype layer (HPO extraction with RDMA): requires GPU ≥ 20 GB.
+  See [`docs/phenotype_layer.md`](docs/phenotype_layer.md) §14.
 
-- [`docs/privacy.md`](docs/privacy.md) — Política de privacidad.
-- [`docs/virtualization.md`](docs/virtualization.md) — Entornos micromamba aislados.
-- [`docs/quickstart.md`](docs/quickstart.md) — Guía de inicio rápido.
-- [`docs/use_cases.md`](docs/use_cases.md) — Casos de uso clínicos.
-- [`docs/installation.md`](docs/installation.md) — Instalación.
+## License
+
+MIT. See [`LICENSE`](LICENSE).
+
