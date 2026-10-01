@@ -410,3 +410,62 @@ def test_rule_joint_call_requires_pedigree(tmp_path: Path):
         assert action.tool_name != "joint_call"
         break
 
+# ---------------------------------------------------------------------------
+# RuleFirstLLMPlanner (híbrido)
+# ---------------------------------------------------------------------------
+
+from publicgenomicagent.agent.planner import RuleFirstLLMPlanner
+
+
+def test_hybrid_planner_does_not_call_llm_when_rule_has_action():
+    """Si el rule-based tiene acción, el LLM no se consulta."""
+    state = AgentState(case=_case_with_roi())
+    state.bams = {"proband": Path("/tmp/p.bam")}
+
+    client = FakeLLMClient([])  # agotado: fallaría si se llamara
+    planner = RuleFirstLLMPlanner(client=client)
+
+    action = planner.next_action(state)
+    assert action is not None
+    assert action.tool_name == "qc_bam"
+    assert len(client.calls) == 0
+    assert any("LLM no consultado" in n for n in state.notes)
+
+
+def test_hybrid_planner_calls_llm_when_rule_returns_none():
+    """Si el rule-based no tiene acción, se consulta al LLM."""
+    # Estado sin pedigree, sin bams, sin rois -> RuleBasedPlanner
+    # devolverá None y forzará la consulta al LLM.
+    state = AgentState(case=CaseManifest(case_id="x"))
+
+    client = FakeLLMClient(
+        ['{"stop": true, "rationale": "nada que hacer"}']
+    )
+    planner = RuleFirstLLMPlanner(client=client)
+
+    action = planner.next_action(state)
+    assert action is None
+    assert len(client.calls) == 1
+    assert any("reglas agotadas" in n for n in state.notes)
+
+
+def test_hybrid_planner_uses_llm_to_pick_new_tool_when_rule_is_done():
+    """Cuando el rule-based devuelve None, el LLM elige."""
+    # Estado con todo hecho salvo una tool que el rule-based no
+    # cubre: forzamos el estado vacío y el LLM propone algo válido.
+    state = AgentState(case=CaseManifest(case_id="x"))
+
+    client = FakeLLMClient(
+        ['{"tool_name": "compare_vcfs", '
+        '"args": {"baseline_vcf": "/tmp/a.vcf.gz", '
+        '"candidate_vcf": "/tmp/b.vcf.gz", '
+        '"output_delta_vcf": "/tmp/d.vcf.gz"}, '
+        '"rationale": "desambiguar"}']
+    )
+    planner = RuleFirstLLMPlanner(client=client)
+
+    action = planner.next_action(state)
+    assert action is not None
+    assert action.tool_name == "compare_vcfs"
+    assert len(client.calls) == 1
+

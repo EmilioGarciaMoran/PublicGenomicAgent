@@ -389,3 +389,157 @@ class LLMPlanner:
                 return True
         return False
 
+# ---------------------------------------------------------------------------
+# RuleFirstLLMPlanner (híbrido)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class RuleFirstLLMPlanner:
+    """Planner híbrido: reglas primero, LLM como desambiguador.
+
+    Diferencias con `LLMPlanner`:
+
+      - `LLMPlanner` consulta SIEMPRE al LLM primero; solo cae al
+        fallback si el LLM falla o alucina.
+      - `RuleFirstLLMPlanner` consulta SIEMPRE al `RuleBasedPlanner`
+        primero; solo llama al LLM si el determinismo no sabe qué
+        hacer (devuelve None).
+
+    Motivo del cambio: los modelos pequeños (3B) no siguen de forma
+    fiable instrucciones complejas del tipo "no repitas tools ya
+    ejecutadas" o "elige la siguiente tool según el historial".
+    En pipelines con un orden canónico claro, el determinismo es
+    superior; el LLM solo aporta valor cuando el estado es ambiguo.
+
+    Casos en los que el LLM se consulta:
+      - El RuleBasedPlanner no tiene regla aplicable (estado ambiguo).
+      - Hay que desambiguar entre varias acciones válidas.
+      - El caso es atípico y las reglas no lo cubren.
+
+    Cuando el LLM se consulta, el flujo de validación es idéntico al
+    del `LLMPlanner` (parseo, validación de tool, validación de args,
+    rechazo de duplicados, resolución de paths).
+    """
+
+    client: LLMClient
+    rule: RuleBasedPlanner = field(default_factory=RuleBasedPlanner)
+    include_paths: bool = False
+
+    def next_action(self, state: AgentState) -> PlannedAction | None:
+        # 1. Intentar primero con reglas deterministas.
+        rule_action = self.rule.next_action(state)
+        if rule_action is not None:
+            state.note(
+                f"hybrid_planner: rule-based eligió "
+                f"{rule_action.tool_name}; LLM no consultado"
+            )
+            return rule_action
+
+        # 2. Reglas agotadas. Pedimos al LLM que desambigüe.
+        state.note("hybrid_planner: reglas agotadas; consultando LLM")
+
+        user_prompt = render_user_prompt(state, include_paths=self.include_paths)
+
+        try:
+            raw = self.client.complete(SYSTEM_PROMPT, user_prompt)
+        except LLMError as e:
+            state.note(f"hybrid_planner: error del cliente ({e}); stop")
+            return None
+        except Exception as e:  # noqa: BLE001
+            state.note(
+                f"hybrid_planner: excepción ({type(e).__name__}: {e}); stop"
+            )
+            return None
+
+        try:
+            resp = parse_llm_response(raw)
+        except LLMResponseFormatError as e:
+            state.note(f"hybrid_planner: formato inválido ({e}); stop")
+            return None
+
+        if resp.stop:
+            state.note(f"hybrid_planner: stop ({resp.rationale})")
+            return None
+
+        if resp.tool_name not in TOOL_REGISTRY:
+            state.note(
+                f"hybrid_planner: tool desconocida '{resp.tool_name}'; stop"
+            )
+            return None
+
+        spec = get_tool(resp.tool_name)
+        try:
+            spec.input_model(**resp.args)
+        except Exception as e:  # noqa: BLE001
+            state.note(
+                f"hybrid_planner: args inválidos para {resp.tool_name} "
+                f"({type(e).__name__}: {e}); stop"
+            )
+            return None
+
+        # Resolver basenames a paths absolutos, luego comprobar
+        # duplicados con los args ya resueltos.
+        resolved_args = self._resolve_paths(state, resp.args)
+
+        if self._already_executed(state, resp.tool_name, resolved_args):
+            state.note(
+                f"hybrid_planner: {resp.tool_name} ya ejecutada; stop"
+            )
+            return None
+
+        state.note(f"hybrid_planner: LLM eligió {resp.tool_name} — {resp.rationale}")
+        return PlannedAction(
+            tool_name=resp.tool_name,
+            args=resolved_args,
+            rationale=resp.rationale,
+            confidence=0.9,
+        )
+
+    # --- helpers (duplicados del LLMPlanner; si crece la duplicación,
+    #     extraer a mixin) ------------------------------------------------
+
+    @staticmethod
+    def _already_executed(
+        state: AgentState,
+        tool_name: str,
+        args: dict,
+    ) -> bool:
+        def norm(d: dict) -> tuple:
+            return tuple(sorted((k, str(v)) for k, v in d.items()))
+
+        target_args = norm(args)
+
+        for c in state.calls_of(tool_name):
+            if norm(c.input) == target_args:
+                return True
+        return False
+
+    @staticmethod
+    def _resolve_paths(state: AgentState, args: dict) -> dict:
+        """Traduce basenames a paths absolutos usando el estado."""
+        index: dict[str, Path] = {}
+
+        def add(p) -> None:
+            try:
+                bp = Path(p)
+                index[bp.name] = bp
+            except Exception:  # noqa: BLE001
+                pass
+
+        for p in state.bams.values():
+            add(p)
+        for p in state.vcfs.values():
+            add(p)
+        for p in state.references.values():
+            add(p)
+        for p in state.artifacts.values():
+            add(p)
+
+        resolved: dict = {}
+        for k, v in args.items():
+            if isinstance(v, str) and v in index:
+                resolved[k] = index[v]
+            else:
+                resolved[k] = v
+        return resolved
+

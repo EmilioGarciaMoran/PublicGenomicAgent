@@ -639,22 +639,29 @@ def run_trio(
     state.references["hg38"] = Path(reference)
 
     ctx = SessionContext(state=state, runtime=_runtime())
-    from publicgenomicagent.agent.planner import LLMPlanner, RuleBasedPlanner
+    from publicgenomicagent.agent.planner import (
+        RuleBasedPlanner,
+        RuleFirstLLMPlanner,
+    )
 
     planner = None
     if planner_kind == "llm":
+        # El flag "llm" usa el planner híbrido RuleFirstLLMPlanner:
+        # reglas primero, LLM como desambiguador. El LLMPlanner puro
+        # (LLM-first con fallback) sigue disponible en el módulo para
+        # tests y usos programáticos.
         from publicgenomicagent.agent.config import load_config
         from publicgenomicagent.agent.llm_factory import build_llm_client
 
         cfg = load_config().llm
         console.print(
-            f"[dim]planner=llm provider={cfg.provider} "
+            f"[dim]planner=llm (hybrid) provider={cfg.provider} "
             f"model={cfg.model} include_paths={cfg.include_paths}[/dim]"
         )
         client = build_llm_client(cfg)
-        planner = LLMPlanner(
+        planner = RuleFirstLLMPlanner(
             client=client,
-            fallback=RuleBasedPlanner(),
+            rule=RuleBasedPlanner(),
             include_paths=cfg.include_paths,
         )
     elif planner_kind == "rule":
