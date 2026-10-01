@@ -74,7 +74,7 @@ fix documentado en `docs/lirical_setup.md`.
 - `annotate` con VEP/snpEff.
 - Crash test de instalación desde clon limpio.
 
-## BAQ desactivado en `bcftools mpileup`
+## BAQ desactivado en `bcftools mpileup` — **FIXED**
 
 `samtools`/`bcftools mpileup` aplican por defecto BAQ (Base Alignment
 Quality), que recalcula la calidad de cada base según la proximidad a
@@ -83,15 +83,24 @@ fixtures de test y los BAMs de demo), BAQ asigna calidad 0 a casi
 todas las bases, lo cual hace que `mpileup` descarte la mayoría y que
 `bcftools call` no detecte variantes.
 
-Síntoma: `samtools mpileup` devuelve `*` en la columna de bases y `0`
-en la columna de profundidad, incluso cuando hay 29 lecturas que
-cubren la posición. Con `-Q 0` sí aparecen, pero con qualidades
+**Síntoma**: `samtools mpileup` devuelve `*` en la columna de bases
+y `0` en la columna de profundidad, incluso cuando hay 29 lecturas
+que cubren la posición. Con `-Q 0` sí aparecen, pero con qualidades
 falsamente bajas (`!` = Q0, `"` = Q1).
 
-Solución: usamos `-B` (sin BAQ) en `call_variants.py`. Los BAMs reales
-de secuenciación paired-end no sufren tanto, pero desactivar BAQ es
-seguro y evita falsos negativos en datos sintéticos.
+**Status**: **fixed**. Ambas tools que usan `bcftools mpileup`
+(`call_variants` y `joint_call`) pasan `-B` (sin BAQ) desde el
+commit `259ee24`:
 
-Ver: `tests/fixtures/make_bam_with_variant.py` genera BAMs con
-lecturas unpaired, lo cual es el caso extremo donde BAQ es más
+    bcftools mpileup -B -f ref.fa ...
+
+Los BAMs reales de secuenciación paired-end no sufren tanto, pero
+desactivar BAQ es seguro y evita falsos negativos en datos sintéticos.
+
+**Verificación**: `tests/integration/test_demo_trio.py` valida el
+pipeline completo con BAMs unpaired y comprueba que la variante
+`chr1:1100 A>G` se detecta con genotipos `0/1`, `0/1`, `1/1`.
+
+**Referencia**: `tests/fixtures/make_bam_with_variant.py` genera BAMs
+con lecturas unpaired, lo cual es el caso extremo donde BAQ es más
 agresivo.
