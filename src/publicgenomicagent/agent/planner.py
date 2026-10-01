@@ -363,3 +363,29 @@ class LLMPlanner:
             rationale=resp.rationale,
             confidence=1.0,
         )
+
+    # --- helpers ---------------------------------------------------------
+
+    @staticmethod
+    def _already_executed(
+        state: AgentState,
+        tool_name: str,
+        args: dict,
+    ) -> bool:
+        """True si (tool_name, args) coincide con una tool_call ok previa.
+
+        Corta el bucle infinito cuando el LLM insiste en la misma
+        tool con los mismos argumentos.
+        """
+        def norm(d: dict) -> tuple:
+            return tuple(sorted((k, str(v)) for k, v in d.items()))
+
+        target_args = norm(args)
+
+        for c in state.calls_of(tool_name):
+            if not c.ok:
+                continue
+            if norm(c.input) == target_args:
+                return True
+        return False
+

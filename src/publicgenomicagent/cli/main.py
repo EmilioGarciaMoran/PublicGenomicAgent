@@ -596,8 +596,18 @@ def run_trio(
     case_id: str = typer.Option("trio", "--case-id"),
     label: str = typer.Option("", "--label", help="Etiqueta del ROI (p.ej. gen)"),
     max_steps: int = typer.Option(50, "--max-steps"),
+    planner_kind: str = typer.Option(
+        "rule", "--planner", "-p",
+        help="rule (determinista) | llm (LLM local con fallback)",
+    ),
 ) -> None:
-    """Ejecuta el loop agéntico determinista sobre un trío."""
+    """Ejecuta el loop agéntico sobre un trío.
+
+    Con --planner rule (default), usa el RuleBasedPlanner determinista.
+    Con --planner llm, usa el LLMPlanner contra el Ollama local; si el
+    LLM alucina (tool desconocida, args inválidos, stop prematuro),
+    cae automáticamente al RuleBasedPlanner.
+    """
     from publicgenomicagent.agent.loop import AgentLoop, build_trio_case
     from publicgenomicagent.agent.state import AgentState, SessionContext
     from publicgenomicagent.tools.base import GenomicRange
@@ -629,9 +639,32 @@ def run_trio(
     state.references["hg38"] = Path(reference)
 
     ctx = SessionContext(state=state, runtime=_runtime())
-    from publicgenomicagent.agent.planner import RuleBasedPlanner
+    from publicgenomicagent.agent.planner import LLMPlanner, RuleBasedPlanner
 
-    planner = RuleBasedPlanner()
+    planner = None
+    if planner_kind == "llm":
+        from publicgenomicagent.agent.config import load_config
+        from publicgenomicagent.agent.llm_factory import build_llm_client
+
+        cfg = load_config().llm
+        console.print(
+            f"[dim]planner=llm provider={cfg.provider} "
+            f"model={cfg.model} include_paths={cfg.include_paths}[/dim]"
+        )
+        client = build_llm_client(cfg)
+        planner = LLMPlanner(
+            client=client,
+            fallback=RuleBasedPlanner(),
+            include_paths=cfg.include_paths,
+        )
+    elif planner_kind == "rule":
+        planner = RuleBasedPlanner()
+    else:
+        console.print(
+            f"[red]--planner debe ser 'rule' o 'llm', no '{planner_kind}'[/red]"
+        )
+        raise typer.Exit(code=2)
+
     loop = AgentLoop(max_steps=max_steps, planner=planner)
     results = loop.run(ctx)
 
