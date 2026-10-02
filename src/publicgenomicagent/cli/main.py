@@ -776,3 +776,31 @@ def plan(
     console.print("\n[bold]Notas del planner:[/bold]")
     for n in state.notes:
         console.print(f"  - {n}")
+
+# ----------------------------- report ----------------------------------
+
+@app.command("report")
+def report(
+    session_json: str = typer.Argument(..., help="Estado de sesión guardado"),
+    out: str = typer.Option(
+        "report.html", "--out", "-o",
+        help="Fichero HTML de salida",
+    ),
+) -> None:
+    """Genera un informe HTML autocontenido a partir de un session.json."""
+    from publicgenomicagent.agent.report import render_session_report
+
+    src_path = Path(session_json)
+    if not src_path.exists():
+        console.print(f"[red]No existe:[/red] {src_path}")
+        raise typer.Exit(code=2)
+
+    try:
+        out_path = render_session_report(src_path, Path(out))
+    except Exception as e:  # noqa: BLE001
+        console.print(f"[red]ERROR[/red] {type(e).__name__}: {e}")
+        raise typer.Exit(code=1)
+
+    console.print(f"[green]Informe generado:[/green] {out_path}")
+    console.print(f"[dim]Ábrelo con: xdg-open {out_path}[/dim]")
+
