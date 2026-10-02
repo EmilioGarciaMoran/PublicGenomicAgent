@@ -28,6 +28,8 @@ from .base import (
     BuildLocalGraphOutput,
     CallFromGraphInput,
     CallFromGraphOutput,
+    AnnotateVariantsInput,
+    AnnotateVariantsOutput,
     CallVariantsInput,
     CallVariantsOutput,
     CompareVCFsInput,
@@ -50,6 +52,7 @@ from .base import (
     QCBamOutput,
     ToolOutput,
 )
+from .annotate import annotate_variants
 from .call_variants import call_variants, joint_call
 from .compare_vcfs import compare_vcfs
 from .extract_hpo import extract_hpo
@@ -109,6 +112,15 @@ TOOL_REGISTRY: dict[str, ToolSpec] = {
         needs_runtime=True,
         description="Variant calling sobre un sub-BAM (bcftools mpileup+call).",
         tags=("hts", "variants"),
+    ),
+    "annotate_variants": ToolSpec(
+        name="annotate_variants",
+        func=annotate_variants,
+        input_model=AnnotateVariantsInput,
+        output_model=AnnotateVariantsOutput,
+        needs_runtime=True,
+        description="Copia columnas (CLNSIG, CLNDN...) de un VCF de anotaciones.",
+        tags=("variants", "annotation"),
     ),
     "joint_call": ToolSpec(
         name="joint_call",

@@ -24,6 +24,7 @@ EXPECTED_TOOLS = {
     "qc_bam",
     "call_variants",
     "joint_call",
+    "annotate_variants",
     "compare_vcfs",
     "local_pangenome",
     "build_local_graph",

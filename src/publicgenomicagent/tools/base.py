@@ -105,6 +105,37 @@ class JointCallOutput(ToolOutput):
     samples: list[str] = []
 
 
+# --- annotate_variants ------------------------------------------------
+
+class AnnotateVariantsInput(BaseModel):
+    """Anota un VCF con columnas de un VCF de referencia (ClinVar, gnomAD...).
+
+    El join se hace por (CHROM, POS, REF, ALT). Si el annotations_vcf
+    usa una nomenclatura de contigs distinta (p.ej. "1" en vez de
+    "chr1", como ClinVar), se puede activar `rename_chrs=True` para
+    normalizar automáticamente antes del join.
+    """
+    vcf: Path
+    annotations_vcf: Path
+    output_vcf: Path
+    columns: list[str] = [
+        "INFO/CLNSIG",
+        "INFO/CLNDN",
+        "INFO/CLNREVSTAT",
+    ]
+    rename_chrs: bool = True          # chr1 <-> 1, chrX <-> X
+    region: str | None = None         # opcional, anotar solo un ROI
+    force: bool = True                # sobrescribir si existe
+
+
+class AnnotateVariantsOutput(ToolOutput):
+    output_vcf: Path
+    output_tbi: Path
+    variants_total: int
+    variants_annotated: int           # cuántas tienen al menos una columna copiada
+    columns_copied: list[str]
+
+
 # --- compare_vcfs ------------------------------------------------------
 
 class CompareVCFsInput(BaseModel):

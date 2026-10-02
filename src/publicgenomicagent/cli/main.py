@@ -504,6 +504,44 @@ def tool_phenotype_ranking(
         )
 
 
+@tool_app.command("annotate-variants")
+def tool_annotate_variants(
+    vcf: str = typer.Option(..., "--vcf", "-i", help="VCF de entrada"),
+    annotations_vcf: str = typer.Option(
+        ..., "--annotations-vcf", "-a",
+        help="VCF con anotaciones (ClinVar, gnomAD, cohorte)",
+    ),
+    out: str = typer.Option(..., "--out", "-o", help="VCF anotado de salida"),
+    columns: str = typer.Option(
+        "INFO/CLNSIG,INFO/CLNDN,INFO/CLNREVSTAT",
+        "--columns",
+        help="Columnas a copiar (separadas por coma)",
+    ),
+    no_rename_chrs: bool = typer.Option(
+        False, "--no-rename-chrs",
+        help="No normalizar contigs chr1 <-> 1",
+    ),
+    region: str = typer.Option(None, "--region", "-r", help="Anotar solo un ROI"),
+) -> None:
+    """Anota un VCF con columnas de un VCF de referencia."""
+    from publicgenomicagent.tools.base import AnnotateVariantsInput
+    from publicgenomicagent.tools.annotate import annotate_variants
+
+    cols = [c.strip() for c in columns.split(",") if c.strip()]
+    inp = AnnotateVariantsInput(
+        vcf=Path(vcf),
+        annotations_vcf=Path(annotations_vcf),
+        output_vcf=Path(out),
+        columns=cols,
+        rename_chrs=not no_rename_chrs,
+        region=region,
+    )
+    result = annotate_variants(_runtime(), inp)
+    console.print(f"[green]OK[/green] {result.message}")
+    console.print(f"  VCF: {result.output_vcf}")
+    console.print(f"  anotadas: {result.variants_annotated} / {result.variants_total}")
+
+
 # ----------------------------- phenotype -------------------------------
 
 phenotype_app = typer.Typer(help="Bootstrap de la capa de fenotipo")
