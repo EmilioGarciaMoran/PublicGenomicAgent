@@ -170,6 +170,127 @@ def _render_mendelian_stats(outputs: dict) -> str:
     return f'<div class="grid">{"".join(stats)}</div>'
 
 
+def _read_vcf_variants(vcf_path: Path, max_variants: int = 50) -> list[dict]:
+    """Lee un VCF.gz y devuelve una lista de dicts con la info clave.
+
+    Cada dict tiene: chrom, pos, ref, alt, qual, filter, genotypes
+    (por muestra), y los campos INFO que existan (CLNSIG, CLNDN...).
+
+    Sin dependencias externas: parseo manual del VCF.
+    """
+    import gzip
+
+    variants: list[dict] = []
+    samples: list[str] = []
+    info_keys_of_interest = ["CLNSIG", "CLNDN", "CLNREVSTAT"]
+
+    with gzip.open(vcf_path, "rt") as f:
+        for line in f:
+            if line.startswith("##"):
+                continue
+            if line.startswith("#CHROM"):
+                fields = line.rstrip("\n").split("\t")
+                samples = fields[9:]
+                continue
+            fields = line.rstrip("\n").split("\t")
+            if len(fields) < 8:
+                continue
+
+            chrom, pos, _id, ref, alt, qual, filt = fields[:7]
+            info_raw = fields[7]
+
+            info: dict[str, str] = {}
+            for kv in info_raw.split(";"):
+                if "=" in kv:
+                    k, v = kv.split("=", 1)
+                    info[k] = v
+
+            genotypes: dict[str, str] = {}
+            if len(fields) >= 10 and samples:
+                fmt = fields[8].split(":")
+                gt_idx = fmt.index("GT") if "GT" in fmt else 0
+                for i, s in enumerate(samples):
+                    if 9 + i < len(fields):
+                        parts = fields[9 + i].split(":")
+                        genotypes[s] = parts[gt_idx] if gt_idx < len(parts) else "?"
+
+            row = {
+                "chrom": chrom,
+                "pos": pos,
+                "ref": ref,
+                "alt": alt,
+                "qual": qual,
+                "filter": filt,
+                "genotypes": genotypes,
+            }
+            for k in info_keys_of_interest:
+                if k in info:
+                    row[k] = info[k]
+
+            variants.append(row)
+            if len(variants) >= max_variants:
+                break
+
+    return variants
+
+
+def _render_variants_table(variants: list[dict], samples: list[str]) -> str:
+    """Renderiza la tabla de variantes con genotipos y anotaciones."""
+    if not variants:
+        return '<p class="empty">No variants to display.</p>'
+
+    # Detectar si alguna variante tiene anotación
+    has_annotation = any("CLNSIG" in v for v in variants)
+
+    headers = ["Locus", "REF>ALT", "QUAL"]
+    if samples:
+        for s in samples:
+            headers.append(f"<code>{_e(s)}</code>")
+    if has_annotation:
+        headers.append("ClinVar")
+
+    head = "".join(f"<th>{h}</th>" for h in headers)
+
+    rows = []
+    for v in variants:
+        locus = f"{v['chrom']}:{v['pos']}"
+        cells = [
+            f"<code>{_e(locus)}</code>",
+            f"<code>{_e(v['ref'])}&gt;{_e(v['alt'])}</code>",
+            _e(v.get("qual", "—")),
+        ]
+        for s in samples:
+            gt = v["genotypes"].get(s, "—")
+            # Colorear 0/0 en gris, otros en negro
+            if gt == "0/0" or gt == "./." or gt == ".":
+                cells.append(f'<span style="color:var(--muted)">{_e(gt)}</span>')
+            else:
+                cells.append(f"<strong>{_e(gt)}</strong>")
+        if has_annotation:
+            clnsig = v.get("CLNSIG", "")
+            clndn = v.get("CLNDN", "")
+            if clnsig:
+                # Colorear según significancia
+                if "athogenic" in clnsig or "Pathogenic" in clnsig:
+                    badge_color = "background:#fed7d7;color:#742a2a"
+                elif "enign" in clnsig or "Benign" in clnsig:
+                    badge_color = "background:#c6f6d5;color:#22543d"
+                else:
+                    badge_color = "background:#fefcbf;color:#744210"
+                badge = f'<span style="padding:0.15rem 0.4rem;border-radius:3px;font-size:0.75rem;font-weight:600;{badge_color}">{_e(clnsig)}</span>'
+                if clndn:
+                    badge += f' <span style="color:var(--muted);font-size:0.85em">{_e(clndn)}</span>'
+                cells.append(badge)
+            else:
+                cells.append('<span style="color:var(--muted)">not in ClinVar</span>')
+        rows.append(_row(cells))
+
+    return (
+        f'<table><thead><tr>{head}</tr></thead>'
+        f'<tbody>{"".join(rows)}</tbody></table>'
+    )
+
+
 def render_session_report(session_json: Path | str, output_html: Path | str) -> Path:
     """Render a session.json into a self-contained HTML report.
 
@@ -216,6 +337,28 @@ def render_session_report(session_json: Path | str, output_html: Path | str) -> 
     body_parts.append(_section("Regions of interest", _render_rois(case)))
     body_parts.append(_section("Pipeline executed", _render_tool_calls(tool_calls)))
     body_parts.append(_section("Candidate variants", _render_mendelian_stats(outputs)))
+
+    # Sección extendida: variantes del VCF auto_rec_hom (si existe)
+    # Buscamos el VCF en el output de mendelian_filter
+    mf = outputs.get("mendelian_filter") or {}
+    auto_rec_hom_path = mf.get("auto_rec_hom_vcf")
+    if auto_rec_hom_path and Path(auto_rec_hom_path).exists():
+        try:
+            variants = _read_vcf_variants(Path(auto_rec_hom_path))
+            if variants:
+                # Las muestras vienen del pedigree del case
+                sample_names = [ind.get("sample") for ind in case.get("pedigree", [])]
+                sample_names = [s for s in sample_names if s]
+                body_parts.append(_section(
+                    f"Recessive candidates ({Path(auto_rec_hom_path).name})",
+                    _render_variants_table(variants, sample_names),
+                ))
+        except Exception as e:  # noqa: BLE001
+            body_parts.append(_section(
+                "Recessive candidates",
+                f'<p class="empty">Could not read VCF: {_e(str(e))}</p>',
+            ))
+
     body_parts.append(_section("VCF files produced", _render_vcfs(vcfs)))
 
     body_parts.append(

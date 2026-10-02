@@ -68,3 +68,59 @@ def test_render_report_missing_session_raises(tmp_path: Path):
     with pytest.raises(FileNotFoundError):
         render_session_report(tmp_path / "nope.json", tmp_path / "out.html")
 
+# ---------------------------------------------------------------------------
+# Sección de variantes (lectura de VCFs)
+# ---------------------------------------------------------------------------
+
+def test_read_vcf_variants_basic(tmp_path: Path):
+    """_read_vcf_variants lee un VCF.gz mínimo."""
+    import gzip
+    from publicgenomicagent.agent.report import _read_vcf_variants
+
+    vcf_path = tmp_path / "test.vcf.gz"
+    with gzip.open(vcf_path, "wt") as f:
+        f.write("##fileformat=VCFv4.2\n")
+        f.write("##contig=<ID=chr1,length=10000>\n")
+        f.write('##INFO=<ID=CLNSIG,Number=.,Type=String,Description="ClinVar significance">\n')
+        f.write("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tfather\tmother\tproband\n")
+        f.write("chr1\t1100\t.\tA\tG\t540.8\tPASS\tCLNSIG=Pathogenic\tGT:DP\t0/1:63\t0/1:63\t1/1:63\n")
+
+    variants = _read_vcf_variants(vcf_path)
+    assert len(variants) == 1
+    v = variants[0]
+    assert v["chrom"] == "chr1"
+    assert v["pos"] == "1100"
+    assert v["ref"] == "A"
+    assert v["alt"] == "G"
+    assert v["genotypes"] == {"father": "0/1", "mother": "0/1", "proband": "1/1"}
+    assert v["CLNSIG"] == "Pathogenic"
+
+
+def test_render_variants_table_with_annotations():
+    """_render_variants_table maneja variantes con CLNSIG."""
+    from publicgenomicagent.agent.report import _render_variants_table
+
+    variants = [
+        {
+            "chrom": "chr1", "pos": "1100", "ref": "A", "alt": "G",
+            "qual": "540.8", "filter": "PASS",
+            "genotypes": {"father": "0/1", "mother": "0/1", "proband": "1/1"},
+            "CLNSIG": "Pathogenic", "CLNDN": "Test disease",
+        },
+    ]
+    html = _render_variants_table(variants, ["father", "mother", "proband"])
+    assert "chr1:1100" in html
+    assert "A&gt;G" in html
+    assert "0/1" in html
+    assert "1/1" in html
+    assert "Pathogenic" in html
+    assert "Test disease" in html
+
+
+def test_render_variants_table_empty():
+    """_render_variants_table maneja lista vacía."""
+    from publicgenomicagent.agent.report import _render_variants_table
+
+    html = _render_variants_table([], ["father"])
+    assert "No variants" in html
+
