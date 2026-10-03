@@ -854,3 +854,49 @@ def report(
     console.print(f"[green]Informe generado:[/green] {out_path}")
     console.print(f"[dim]Ábrelo con: xdg-open {out_path}[/dim]")
 
+# ----------------------------- igv -------------------------------------
+
+@app.command("igv")
+def igv(
+    session_json: str = typer.Argument(..., help="Estado de sesión guardado"),
+    out: str = typer.Option(
+        None, "--out", "-o",
+        help="Fichero session.xml de salida (por defecto: <case_id>.igv.xml)",
+    ),
+) -> None:
+    """Genera un session.xml de IGV y URLs de control para el estado."""
+    from publicgenomicagent.agent.igv import build_session_from_state
+
+    src_path = Path(session_json)
+    if not src_path.exists():
+        console.print(f"[red]No existe:[/red] {src_path}")
+        raise typer.Exit(code=2)
+
+    info = build_session_from_state(src_path)
+
+    # Escribir el XML
+    if out is None:
+        case_id = src_path.stem.replace(".session", "")
+        out_path = src_path.parent / f"{case_id}.igv.xml"
+    else:
+        out_path = Path(out)
+    out_path.write_text(info["xml"], encoding="utf-8")
+
+    console.print(f"[green]session.xml generado:[/green] {out_path}")
+    console.print(f"[dim]Ábrelo con IGV Desktop: File > Open Session[/dim]")
+    console.print()
+    console.print(f"[bold]Locus:[/bold] {info['locus'] or '(no definido)'}")
+    console.print(f"[bold]Tracks:[/bold] {len(info['tracks'])}")
+    for name, path in info["tracks"]:
+        console.print(f"  - {name}  [dim]{path}[/dim]")
+    console.print()
+    console.print("[bold]Control URLs (IGV Desktop en localhost:60151):[/bold]")
+    console.print(f"  [green]goto[/green]  {info['goto_url']}")
+    for t in info["track_urls"]:
+        console.print(f"  [green]load[/green]  {t['url']}")
+    console.print()
+    console.print(
+        "[dim]Nota: las URLs de control solo funcionan si IGV Desktop "
+        "está abierto en el puerto 60151 (por defecto).[/dim]"
+    )
+
