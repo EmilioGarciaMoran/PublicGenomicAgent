@@ -291,6 +291,75 @@ def _render_variants_table(variants: list[dict], samples: list[str]) -> str:
     )
 
 
+def _render_ranking(outputs: dict) -> str:
+    """Renderiza el ranking de variantes priorizadas si existe.
+
+    Lee `outputs["prioritize_variants"]["ranking"]`. Devuelve un
+    string vacío si no hay ranking (para no ensuciar el informe).
+    """
+    pv = outputs.get("prioritize_variants")
+    if not pv:
+        return ""
+    ranking = pv.get("ranking") or []
+    if not ranking:
+        return ""
+
+    rows = []
+    for v in ranking:
+        score = v.get("score", 0)
+        # Color según score
+        if score >= 4:
+            badge_style = "background:#c6f6d5;color:#22543d"
+        elif score >= 2:
+            badge_style = "background:#fefcbf;color:#744210"
+        elif score < 0:
+            badge_style = "background:#fed7d7;color:#742a2a"
+        else:
+            badge_style = "background:#e2e8f0;color:#4a5568"
+        badge = (
+            f'<span style="padding:0.15rem 0.5rem;border-radius:4px;'
+            f'font-size:0.75rem;font-weight:600;{badge_style}">'
+            f'{_e(score)}</span>'
+        )
+
+        gt_cells = ""
+        gts = v.get("genotypes") or {}
+        for s in ["father", "mother", "proband"]:
+            gt = gts.get(s, "—")
+            if gt in ("1/1", "1|1"):
+                gt_cells += f'<td><strong>{_e(gt)}</strong></td>'
+            else:
+                gt_cells += f'<td style="color:var(--muted)">{_e(gt)}</td>'
+
+        clnsig = v.get("clnsig") or "—"
+        reasons = ", ".join(v.get("reasons") or []) or "—"
+
+        rows.append(
+            "<tr>"
+            f'<td>{_e(v.get("rank"))}</td>'
+            f'<td><code>{_e(v.get("chrom"))}:{_e(v.get("pos"))} '
+            f'{_e(v.get("ref"))}&gt;{_e(v.get("alt"))}</code></td>'
+            f'<td>{badge}</td>'
+            f'{gt_cells}'
+            f'<td style="font-size:0.8em">{_e(clnsig)}</td>'
+            f'<td style="font-size:0.75em;color:var(--muted)">{_e(reasons)}</td>'
+            "</tr>"
+        )
+
+    return (
+        '<table><thead><tr>'
+        '<th>Rank</th><th>Variant</th><th>Score</th>'
+        '<th>Father</th><th>Mother</th><th>Proband</th>'
+        '<th>ClinVar</th><th>Reasons</th>'
+        '</tr></thead>'
+        f'<tbody>{"".join(rows)}</tbody></table>'
+        '<p style="font-size:0.75em;color:var(--muted);margin-top:0.5rem">'
+        'Score: +3 Pathogenic / +2 Likely pathogenic / -3 Benign, '
+        '+2 proband 1/1, +1 QUAL>100, +1 INDEL.'
+        '</p>'
+    )
+
+
 def _render_igv_section(session_json: Path, data: dict) -> str:
     """Renderiza la sección de IGV con enlaces de control y session.xml.
 
@@ -415,6 +484,11 @@ def render_session_report(session_json: Path | str, output_html: Path | str) -> 
                 "Recessive candidates",
                 f'<p class="empty">Could not read VCF: {_e(str(e))}</p>',
             ))
+
+    # Ranking (si existe)
+    ranking_html = _render_ranking(outputs)
+    if ranking_html:
+        body_parts.append(_section("Prioritised variants", ranking_html))
 
     body_parts.append(_section("VCF files produced", _render_vcfs(vcfs)))
     body_parts.append(_section("Open in IGV", _render_igv_section(session_path, data)))

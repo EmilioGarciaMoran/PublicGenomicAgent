@@ -124,3 +124,35 @@ def test_render_variants_table_empty():
     html = _render_variants_table([], ["father"])
     assert "No variants" in html
 
+def test_render_ranking_with_data():
+    """_render_ranking genera una tabla si hay ranking."""
+    from publicgenomicagent.agent.report import _render_ranking
+
+    outputs = {
+        "prioritize_variants": {
+            "ranking": [
+                {
+                    "rank": 1, "chrom": "chr1", "pos": 1100,
+                    "ref": "A", "alt": "G", "score": 3.0,
+                    "genotypes": {"father": "0/1", "mother": "0/1", "proband": "1/1"},
+                    "clnsig": "Pathogenic", "clndn": "Test",
+                    "reasons": ["proband hom alt", "QUAL>100"],
+                },
+            ],
+        },
+    }
+    html = _render_ranking(outputs)
+    assert "chr1:1100" in html
+    assert "A&gt;G" in html
+    assert "proband hom alt" in html
+    assert "Pathogenic" in html
+
+
+def test_render_ranking_empty_when_missing():
+    """_render_ranking devuelve string vacío sin ranking."""
+    from publicgenomicagent.agent.report import _render_ranking
+
+    assert _render_ranking({}) == ""
+    assert _render_ranking({"prioritize_variants": {}}) == ""
+    assert _render_ranking({"prioritize_variants": {"ranking": []}}) == ""
+
