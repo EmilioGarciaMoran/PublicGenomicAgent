@@ -75,3 +75,48 @@ def test_build_session_from_state(tmp_path: Path):
     assert len(info["tracks"]) == 2
     assert "proband.bam" in info["xml"]
 
+def test_build_session_from_state_filters_intermediate_vcfs(tmp_path: Path):
+    """Por defecto, los VCFs intermedios (called:*) se filtran."""
+    import json as _json
+    from publicgenomicagent.agent.igv import build_session_from_state
+
+    # Crear ficheros dummy
+    for name in ["father.bam", "mother.bam", "proband.bam",
+                 "father.vcf.gz", "trio.vcf.gz", "annotated.vcf.gz"]:
+        (tmp_path / name).write_bytes(b"")
+
+    session = {
+        "case": {
+            "case_id": "TEST",
+            "candidate_rois": [{"chrom": "chr1", "start": 1000, "end": 1200}],
+        },
+        "bams": {
+            "father": str(tmp_path / "father.bam"),
+            "mother": str(tmp_path / "mother.bam"),
+            "proband": str(tmp_path / "proband.bam"),
+        },
+        "vcfs": {
+            "called:father": str(tmp_path / "father.vcf.gz"),
+            "trio": str(tmp_path / "trio.vcf.gz"),
+            "annotated": str(tmp_path / "annotated.vcf.gz"),
+        },
+        "references": {},
+    }
+    session_file = tmp_path / "session.json"
+    session_file.write_text(_json.dumps(session))
+
+    # Por defecto: filtrado
+    info = build_session_from_state(session_file)
+    names = [n for n, _ in info["tracks"]]
+    assert "father.bam" in names
+    assert "trio.vcf.gz" in names
+    assert "annotated.vcf.gz" in names
+    # called:father debe estar filtrado
+    assert not any("called" in n for n in names)
+    assert not any(":" in n for n in names)
+
+    # all_tracks=True: todo
+    info_all = build_session_from_state(session_file, all_tracks=True)
+    names_all = [n for n, _ in info_all["tracks"]]
+    assert any("father.vcf.gz" in n for n in names_all)
+

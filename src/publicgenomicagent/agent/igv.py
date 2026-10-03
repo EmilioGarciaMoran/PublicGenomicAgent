@@ -108,8 +108,12 @@ def build_session_xml(
     return "\n".join(lines) + "\n"
 
 
-def build_session_from_state(session_json: Path) -> dict:
+def build_session_from_state(session_json: Path, *, all_tracks: bool = False) -> dict:
     """Lee un session.json y construye todo lo necesario para IGV.
+
+    Por defecto solo incluye los tracks clínicamente relevantes
+    (VCFs con clave "trio" o "annotated"). Con `all_tracks=True`,
+    incluye todos los BAMs y VCFs del estado.
 
     Devuelve un dict con:
       - xml: string con el session.xml
@@ -130,16 +134,27 @@ def build_session_from_state(session_json: Path) -> dict:
         roi = rois[0]
         locus = f"{roi.get('chrom')}:{roi.get('start')}-{roi.get('end')}"
 
-    # Tracks: BAMs + VCFs
+    # Tracks: BAMs + VCFs (filtrando por relevancia si all_tracks=False)
     tracks: list[tuple[str, Path]] = []
+
+    # BAMs: siempre incluir (son las 3 muestras del trío)
     for sample, path in bams.items():
         p = Path(path)
         if p.exists():
             tracks.append((f"{sample}.bam", p))
+
+    # VCFs: por defecto, solo los relevantes (trio, annotated, auto_rec_hom)
+    PRIORITY_KEYS = {"trio", "annotated", "joint", "auto_rec_hom", "auto_dom", "de_novo", "x_linked_rec"}
     for label, path in vcfs.items():
         p = Path(path)
-        if p.exists():
-            tracks.append((f"{label}.vcf.gz", p))
+        if not p.exists():
+            continue
+        # Normalizar: "called:father" -> parte tras ':' o el label completo
+        short_label = label.split(":", 1)[-1] if ":" in label else label
+        if all_tracks or short_label in PRIORITY_KEYS or label in PRIORITY_KEYS:
+            # Sanitizar ':' a '_' para evitar problemas en XML
+            safe_name = f"{short_label}.vcf.gz".replace(":", "_")
+            tracks.append((safe_name, p))
 
     # XML (necesitamos reference_path por compatibilidad, aunque no se use)
     refs = data.get("references", {})

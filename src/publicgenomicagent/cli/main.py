@@ -863,6 +863,10 @@ def igv(
         None, "--out", "-o",
         help="Fichero session.xml de salida (por defecto: <case_id>.igv.xml)",
     ),
+    all_tracks: bool = typer.Option(
+        False, "--all-tracks",
+        help="Incluir TODOS los BAMs/VCFs (por defecto, solo los relevantes)",
+    ),
 ) -> None:
     """Genera un session.xml de IGV y URLs de control para el estado."""
     from publicgenomicagent.agent.igv import build_session_from_state
@@ -872,7 +876,7 @@ def igv(
         console.print(f"[red]No existe:[/red] {src_path}")
         raise typer.Exit(code=2)
 
-    info = build_session_from_state(src_path)
+    info = build_session_from_state(src_path, all_tracks=all_tracks)
 
     # Escribir el XML
     if out is None:

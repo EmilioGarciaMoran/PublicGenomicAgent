@@ -291,6 +291,63 @@ def _render_variants_table(variants: list[dict], samples: list[str]) -> str:
     )
 
 
+def _render_igv_section(session_json: Path, data: dict) -> str:
+    """Renderiza la sección de IGV con enlaces de control y session.xml.
+
+    Usa el módulo igv.py para construir las URLs y el XML.
+    """
+    try:
+        from .igv import build_session_from_state
+    except Exception:  # noqa: BLE001
+        return '<p class="empty">IGV integration not available.</p>'
+
+    try:
+        info = build_session_from_state(session_json)
+    except Exception as e:  # noqa: BLE001
+        return f'<p class="empty">Could not build IGV info: {_e(str(e))}</p>'
+
+    parts = []
+
+    if info.get("locus"):
+        parts.append(
+            '<p style="margin:0.5rem 0">'
+            f'<a href="{_e(info["goto_url"])}" '
+            'style="display:inline-block;padding:0.4rem 0.9rem;'
+            'background:#2b6cb0;color:white;border-radius:6px;'
+            'font-weight:600;text-decoration:none">'
+            f'Open locus in IGV Desktop → {_e(info["locus"])}</a>'
+            '</p>'
+        )
+        parts.append(
+            '<p style="font-size:0.8rem;color:var(--muted);margin:0.25rem 0">'
+            'Requires IGV Desktop running on '
+            '<code>localhost:60151</code>. '
+            'File → Open Session or use the URL above.'
+            '</p>'
+        )
+
+    tracks = info.get("tracks") or []
+    if tracks:
+        rows = []
+        for name, path in tracks:
+            url = next(
+                (t["url"] for t in info["track_urls"] if t["name"] == name),
+                "",
+            )
+            rows.append(_row([
+                f"<code>{_e(name)}</code>",
+                f'<span style="font-size:0.75em;color:var(--muted)">{_e(path)}</span>',
+                f'<a href="{_e(url)}">load</a>' if url else "—",
+            ]))
+        parts.append(
+            '<table><thead><tr><th>Track</th><th>Path</th><th>Action</th>'
+            '</tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table>'
+        )
+
+    return "\n".join(parts)
+
+
 def render_session_report(session_json: Path | str, output_html: Path | str) -> Path:
     """Render a session.json into a self-contained HTML report.
 
@@ -360,6 +417,7 @@ def render_session_report(session_json: Path | str, output_html: Path | str) -> 
             ))
 
     body_parts.append(_section("VCF files produced", _render_vcfs(vcfs)))
+    body_parts.append(_section("Open in IGV", _render_igv_section(session_path, data)))
 
     body_parts.append(
         '<div class="privacy">'
