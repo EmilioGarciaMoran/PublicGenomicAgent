@@ -72,7 +72,8 @@ def test_build_session_from_state(tmp_path: Path):
     info = build_session_from_state(session_file)
     assert info["locus"] == "chr1:1000-1200"
     assert "goto?locus=chr1:1000-1200" in info["goto_url"]
-    assert len(info["tracks"]) == 2
+    # Con filtrado por defecto, solo el BAM (el VCF "called" se filtra)
+    assert len(info["tracks"]) == 1
     assert "proband.bam" in info["xml"]
 
 def test_build_session_from_state_filters_intermediate_vcfs(tmp_path: Path):
