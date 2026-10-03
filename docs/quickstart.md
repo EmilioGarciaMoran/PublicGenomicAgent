@@ -203,7 +203,7 @@ Score rules:
 The output VCF is a copy of the input; the ranking appears in the
 HTML report when present.
 
-## 7. Next steps
+## 8. Next steps
 
 - **Run with the LLM planner** (hybrid: rules first, LLM only
   when rules are exhausted):
