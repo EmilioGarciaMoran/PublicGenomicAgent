@@ -99,6 +99,7 @@ class RuleBasedPlanner:
             self._rule_call_variants,
             self._rule_joint_call,
             self._rule_mendelian,
+            self._rule_annotate,
         ):
             action = rule(state)
             if action is not None:
@@ -284,7 +285,30 @@ class RuleBasedPlanner:
             rationale="Hay pedigree y VCF de trío, aplicamos filtros mendelianos.",
         )
 
-
+    def _rule_annotate(self, state: AgentState) -> PlannedAction | None:
+        """Anota el VCF del trio con ClinVar si esta configurado."""
+        trio = state.vcfs.get("trio")
+        if trio is None:
+            return None
+        clinvar = state.references.get("clinvar")
+        if clinvar is None:
+            return None
+        if "annotated" in state.vcfs:
+            return None
+        if state.calls_of("annotate_variants"):
+            return None
+        out_vcf = Path(str(trio).replace(".vcf.gz", ".annotated.vcf.gz"))
+        return PlannedAction(
+            tool_name="annotate_variants",
+            args={
+                "vcf": trio,
+                "annotations_vcf": clinvar,
+                "output_vcf": out_vcf,
+                "columns": ["INFO/CLNSIG", "INFO/CLNDN", "INFO/CLNREVSTAT"],
+                "rename_chrs": True,
+            },
+            rationale="Anotamos el VCF del trio con ClinVar.",
+        )
 # ---------------------------------------------------------------------------
 # LLMPlanner
 # ---------------------------------------------------------------------------

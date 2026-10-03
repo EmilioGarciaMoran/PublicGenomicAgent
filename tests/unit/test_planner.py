@@ -469,3 +469,33 @@ def test_hybrid_planner_uses_llm_to_pick_new_tool_when_rule_is_done():
     assert action.tool_name == "compare_vcfs"
     assert len(client.calls) == 1
 
+# ---------------------------------------------------------------------------
+# RuleBasedPlanner: _rule_annotate
+# ---------------------------------------------------------------------------
+
+def test_rule_annotate_skipped_without_clinvar(tmp_path: Path):
+    state = AgentState(case=_trio_case())
+    state.vcfs["trio"] = tmp_path / "trio.vcf.gz"
+    p = RuleBasedPlanner()
+    assert p._rule_annotate(state) is None
+
+
+def test_rule_annotate_proposes_when_clinvar_present(tmp_path: Path):
+    state = AgentState(case=_trio_case())
+    state.vcfs["trio"] = tmp_path / "trio.vcf.gz"
+    state.references["clinvar"] = tmp_path / "clinvar.vcf.gz"
+    p = RuleBasedPlanner()
+    action = p._rule_annotate(state)
+    assert action is not None
+    assert action.tool_name == "annotate_variants"
+    assert "INFO/CLNSIG" in action.args["columns"]
+
+
+def test_rule_annotate_skipped_after_success(tmp_path: Path):
+    state = AgentState(case=_trio_case())
+    state.vcfs["trio"] = tmp_path / "trio.vcf.gz"
+    state.references["clinvar"] = tmp_path / "clinvar.vcf.gz"
+    state.vcfs["annotated"] = tmp_path / "trio.annotated.vcf.gz"
+    p = RuleBasedPlanner()
+    assert p._rule_annotate(state) is None
+

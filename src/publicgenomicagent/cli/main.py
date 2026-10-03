@@ -638,6 +638,10 @@ def run_trio(
         "rule", "--planner", "-p",
         help="rule (determinista) | llm (LLM local con fallback)",
     ),
+    clinvar: str = typer.Option(
+        None, "--clinvar",
+        help="VCF de ClinVar (opcional). Si se pasa, se anota el VCF final.",
+    ),
 ) -> None:
     """Ejecuta el loop agéntico sobre un trío.
 
@@ -675,6 +679,14 @@ def run_trio(
         "proband": Path(proband),
     }
     state.references["hg38"] = Path(reference)
+
+    if clinvar:
+        clinvar_path = Path(clinvar)
+        if not clinvar_path.exists():
+            console.print(f"[red]ClinVar no existe:[/red] {clinvar_path}")
+            raise typer.Exit(code=2)
+        state.references["clinvar"] = clinvar_path
+        console.print(f"[dim]ClinVar configurado: {clinvar_path.name}[/dim]")
 
     ctx = SessionContext(state=state, runtime=_runtime())
     from publicgenomicagent.agent.planner import (
