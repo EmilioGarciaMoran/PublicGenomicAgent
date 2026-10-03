@@ -98,7 +98,7 @@ A single command runs the entire analysis:
     --case-id DEMO_TRIO --label DEMO1
 ```
 
-The loop executes **11 automatic steps**:
+The loop executes **11 automatic steps** (or 13 with ClinVar):
 
 ```
 qc_bam              x 3   (one per BAM)
@@ -109,6 +109,22 @@ mendelian_filter    x 1   (segregation analysis)
 ```
 
 The final state is saved to `results/DEMO_TRIO.session.json`.
+
+### 5b. With ClinVar annotation
+
+Add --clinvar for the 13-step pipeline (annotation + prioritisation):
+
+    pga run-trio ... --clinvar ~/clinvar.vcf.gz
+
+The two extra steps are:
+
+    annotate_variants    x 1   (copy CLNSIG, CLNDN from ClinVar)
+    prioritize_variants  x 1   (score variants by clinical relevance)
+
+Get ClinVar (GRCh38, ~100 MB):
+
+    wget https://ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh38/clinvar.vcf.gz
+    wget https://ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh38/clinvar.vcf.gz.tbi
 
 ## 6. Inspect the results
 
@@ -143,6 +159,49 @@ Inspect the full tool-call trace:
 python3 -c "import json; d=json.load(open('results/DEMO_TRIO.session.json')); \\
 [print(f'{i}: {c[chr(34)]}{c[chr(34)]}') for i, c in enumerate(d['tool_calls'])]"
 ```
+
+## 7. Reports and visualisation
+
+HTML report (self-contained, no dependencies):
+
+    pga report results/DEMO_TRIO.session.json --out report.html
+    xdg-open report.html
+
+Shows pedigree, ROIs, tool-call trace, candidate variants with
+per-sample genotypes, ClinVar significance, prioritised ranking,
+and a link to open the locus in IGV.
+
+IGV session:
+
+    pga igv results/DEMO_TRIO.session.json
+
+Generates results/DEMO_TRIO.igv.xml with the reference, BAMs and
+relevant VCFs, and prints control URLs:
+
+    goto  http://localhost:60151/goto?locus=chr1:1000-1200
+    load  http://localhost:60151/load?file=/abs/path/father.bam
+
+Open the XML in IGV Desktop (File -> Open Session). Use
+--all-tracks to include intermediate VCFs.
+
+### 7a. Prioritisation as a standalone tool
+
+    pga tool prioritize-variants \
+        --vcf results/roi/joint_chr1_1000_1200.annotated.vcf.gz \
+        --out results/roi/prioritized.vcf.gz \
+        --proband proband
+
+Score rules:
+
+  +3 ClinVar CLNSIG contains Pathogenic
+  +2 Likely pathogenic
+  -3 Benign
+  +2 proband genotype is 1/1
+  +1 QUAL > 100
+  +1 INDEL
+
+The output VCF is a copy of the input; the ranking appears in the
+HTML report when present.
 
 ## 7. Next steps
 
