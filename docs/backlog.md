@@ -16,8 +16,11 @@ Legend: ✅ done · ⚠️ partial · ❌ not started · 🚧 in progress
 | Tools (13 registered, Pydantic I/O) | ✅ |
 | Agent state, loop, planners | ✅ |
 | CLI (`env`, `tool`, `llm`, `plan`, `run-trio`) | ✅ |
-| Pipeline end-to-end on synthetic trio | ✅ |
-| Tests (68 unit + 30 integration) | ✅ |
+| Pipeline end-to-end on synthetic trio (11 steps) | ✅ |
+| Pipeline with --clinvar (12 steps) | ✅ |
+| HTML report (with variant table) | ✅ |
+| IGV session + control URLs | ✅ |
+| Tests (77 unit + 30 integration) | ✅ |
 | Privacy policy (`docs/privacy.md`) | ✅ |
 | README (English, professional) | ✅ |
 | License (Apache 2.0) | ✅ |
@@ -56,11 +59,12 @@ framework into a tool a geneticist would actually use.
 
 | # | Item | Effort | Impact | Status |
 |---|---|---|---|---|
-| 2.1 | `annotate_variants` tool (VEP + ClinVar + gnomAD) | 3-4h | High | ❌ |
+| 2.1 | `annotate_variants` tool (ClinVar) | 3-4h | High | ✅ |
+| 2.1b | `--clinvar` auto-annotation in `run-trio` | 30min | High | ✅ |
 | 2.2 | Local cohort enrichment (gnomAD MENA, KSA public) | 4h | High | ❌ |
 | 2.3 | Variant prioritisation rules (ACMG-like filters) | 4h | High | ❌ |
-| 2.4 | Clinical report generator (HTML, template) | 1 day | High | ❌ |
-| 2.5 | IGV session generator + `localhost:60151` URLs | 2h | Medium | ❌ |
+| 2.4 | Clinical report generator (HTML, template) | 1 day | High | ✅ |
+| 2.5 | IGV session generator + `localhost:60151` URLs | 2h | Medium | ✅ |
 | 2.6 | Pangenome end-to-end integration test | 2h | High | ❌ |
 
 ---
