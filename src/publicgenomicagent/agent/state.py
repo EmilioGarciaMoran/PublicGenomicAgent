@@ -280,6 +280,9 @@ def _register_side_effects(state: AgentState, tool_name: str, out: ToolOutput) -
         # que contiene las 3 muestras en columnas separadas.
         if "output_vcf" in d:
             state.vcfs["trio"] = Path(d["output_vcf"])
+    elif tool_name == "prioritize_variants":
+        if "output_vcf" in d:
+            state.vcfs["prioritized"] = Path(d["output_vcf"])
     elif tool_name == "annotate_variants":
         # El VCF anotado se indexa con la clave "annotated".
         if "output_vcf" in d:

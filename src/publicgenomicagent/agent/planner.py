@@ -100,6 +100,7 @@ class RuleBasedPlanner:
             self._rule_joint_call,
             self._rule_mendelian,
             self._rule_annotate,
+            self._rule_prioritize,
         ):
             action = rule(state)
             if action is not None:
@@ -309,6 +310,28 @@ class RuleBasedPlanner:
             },
             rationale="Anotamos el VCF del trio con ClinVar.",
         )
+    def _rule_prioritize(self, state: AgentState) -> PlannedAction | None:
+        """Prioriza variantes del VCF (anotado o trio) por reglas clinicas."""
+        if "prioritized" in state.vcfs:
+            return None
+        if state.calls_of("prioritize_variants"):
+            return None
+        vcf = state.vcfs.get("annotated") or state.vcfs.get("trio")
+        if vcf is None:
+            return None
+        out_vcf = Path(str(vcf).replace(".vcf.gz", ".prioritized.vcf.gz"))
+        return PlannedAction(
+            tool_name="prioritize_variants",
+            args={
+                "vcf": vcf,
+                "output_vcf": out_vcf,
+                "proband": state.case.proband,
+                "top_n": 20,
+            },
+            rationale="Priorizamos variantes por ClinVar, cigosidad y QUAL.",
+        )
+
+
 # ---------------------------------------------------------------------------
 # LLMPlanner
 # ---------------------------------------------------------------------------
@@ -417,6 +440,12 @@ class LLMPlanner:
 # RuleFirstLLMPlanner (híbrido)
 # ---------------------------------------------------------------------------
 
+
+# ---------------------------------------------------------------------------
+# LLMPlanner
+# ---------------------------------------------------------------------------
+
+@dataclass
 @dataclass
 class RuleFirstLLMPlanner:
     """Planner híbrido: reglas primero, LLM como desambiguador.
