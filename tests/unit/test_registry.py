@@ -25,6 +25,7 @@ EXPECTED_TOOLS = {
     "call_variants",
     "joint_call",
     "annotate_variants",
+    "prioritize_variants",
     "compare_vcfs",
     "local_pangenome",
     "build_local_graph",

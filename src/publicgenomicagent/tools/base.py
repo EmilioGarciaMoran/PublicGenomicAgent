@@ -132,8 +132,49 @@ class AnnotateVariantsOutput(ToolOutput):
     output_vcf: Path
     output_tbi: Path
     variants_total: int
-    variants_annotated: int           # cuántas tienen al menos una columna copiada
+    variants_annotated: int
     columns_copied: list[str]
+
+
+# --- prioritize_variants ----------------------------------------------
+
+class VariantRank(BaseModel):
+    """Una variante priorizada con su score."""
+    rank: int
+    chrom: str
+    pos: int
+    ref: str
+    alt: str
+    qual: float | None = None
+    genotypes: dict[str, str] = {}
+    clnsig: str | None = None
+    clndn: str | None = None
+    score: float
+    reasons: list[str] = []
+
+
+class PrioritizeVariantsInput(BaseModel):
+    """Ordena variantes de un VCF por relevancia clínica.
+
+    Reglas (0-10 puntos):
+      +3  CLNSIG contiene "Pathogenic"
+      +2  CLNSIG contiene "Likely_pathogenic"
+      -3  CLNSIG contiene "Benign"
+      +2  proband es homocigoto alt (1/1)
+      +1  QUAL > 100
+      +1  INDEL
+    """
+    vcf: Path
+    output_vcf: Path
+    proband: str | None = None   # sample del probando (para +2 si 1/1)
+    top_n: int = 20              # cuántas variantes devolver en el ranking
+
+
+class PrioritizeVariantsOutput(ToolOutput):
+    output_vcf: Path
+    ranking: list[VariantRank] = []
+    variants_total: int = 0
+    variants_scored: int = 0
 
 
 # --- compare_vcfs ------------------------------------------------------

@@ -36,6 +36,8 @@ from .base import (
     CompareVCFsOutput,
     JointCallInput,
     JointCallOutput,
+    PrioritizeVariantsInput,
+    PrioritizeVariantsOutput,
     ExtractHPOInput,
     ExtractHPOOutput,
     FetchROIInput,
@@ -53,6 +55,7 @@ from .base import (
     ToolOutput,
 )
 from .annotate import annotate_variants
+from .prioritize import prioritize_variants
 from .call_variants import call_variants, joint_call
 from .compare_vcfs import compare_vcfs
 from .extract_hpo import extract_hpo
@@ -121,6 +124,15 @@ TOOL_REGISTRY: dict[str, ToolSpec] = {
         needs_runtime=True,
         description="Copia columnas (CLNSIG, CLNDN...) de un VCF de anotaciones.",
         tags=("variants", "annotation"),
+    ),
+    "prioritize_variants": ToolSpec(
+        name="prioritize_variants",
+        func=prioritize_variants,
+        input_model=PrioritizeVariantsInput,
+        output_model=PrioritizeVariantsOutput,
+        needs_runtime=False,
+        description="Puntua y ordena variantes por reglas clinicas simples.",
+        tags=("variants", "prioritization"),
     ),
     "joint_call": ToolSpec(
         name="joint_call",
