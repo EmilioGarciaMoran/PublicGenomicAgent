@@ -37,6 +37,7 @@ EXPECTED_TOOL_SEQUENCE = [
     "call_variants", "call_variants", "call_variants",
     "joint_call",
     "mendelian_filter",
+    "prioritize_variants",
 ]
 
 
@@ -181,6 +182,6 @@ def test_demo_trio_session_is_serializable(demo_trio: dict, tmp_path: Path) -> N
 
     data = json.loads(session_path.read_text())
     assert data["case"]["case_id"] == "DEMO_TRIO"
-    assert len(data["tool_calls"]) == 11
+    assert len(data["tool_calls"]) == 12
     # Todas las tool_calls ok
     assert all(c["ok"] for c in data["tool_calls"])
