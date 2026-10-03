@@ -316,7 +316,16 @@ class RuleBasedPlanner:
             return None
         if state.calls_of("prioritize_variants"):
             return None
-        vcf = state.vcfs.get("annotated") or state.vcfs.get("trio")
+        # Preferir el VCF de auto_rec_hom (ya filtrado por mendelismo).
+        # Si no existe, caer al annotated/trio.
+        vcf = None
+        mf = state.latest("mendelian_filter")
+        if mf and mf.get("auto_rec_hom_vcf"):
+            cand = Path(mf["auto_rec_hom_vcf"])
+            if cand.exists():
+                vcf = cand
+        if vcf is None:
+            vcf = state.vcfs.get("annotated") or state.vcfs.get("trio")
         if vcf is None:
             return None
         out_vcf = Path(str(vcf).replace(".vcf.gz", ".prioritized.vcf.gz"))
