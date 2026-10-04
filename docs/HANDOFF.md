@@ -5,7 +5,7 @@
 
 ## Estado del repo
 
-- **Último commit**: b01a032 (fix pipeline with ClinVar)
+- **Último commit**: 3ca947f (benchmark linear vs pangenome)
 - **Tests**: 119 passed (85 unit, 34 integration)
 - **CI**: verde (GitHub Actions)
 - **Branch**: main, sync con origin/main
@@ -18,6 +18,8 @@
 - `_rule_prioritize` ahora prefiere `auto_rec_hom.vcf.gz`.
 - Primer run real: Osteopetrosis trio (chr8, hg19) en 19.6s con `--clinvar`.
 - `docs/demo_osteo_real.md` documenta el hito.
+- Primer benchmark lineal vs pangenoma (102 vs 91 variantes, 76 compartidas).
+- `docs/benchmark_linear_vs_pangenome.md`.
 
 ### Sesión 2026-10-03
 - Añadido `prioritize_variants` en el pipeline (paso 13 con --clinvar).
