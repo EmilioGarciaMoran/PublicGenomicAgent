@@ -39,8 +39,8 @@ EXPECTED_TOOL_SEQUENCE = [
     "fetch_roi", "fetch_roi", "fetch_roi",
     "call_variants", "call_variants", "call_variants",
     "joint_call",
-    "mendelian_filter",
     "annotate_variants",
+    "mendelian_filter",
     "prioritize_variants",
 ]
 

@@ -98,8 +98,8 @@ class RuleBasedPlanner:
             self._rule_fetch_roi,
             self._rule_call_variants,
             self._rule_joint_call,
-            self._rule_mendelian,
             self._rule_annotate,
+            self._rule_mendelian,
             self._rule_prioritize,
         ):
             action = rule(state)
@@ -272,7 +272,13 @@ class RuleBasedPlanner:
             return None
         if state.has_tool("mendelian_filter"):
             return None
-        trio_vcf = state.vcfs.get("trio") or state.vcfs.get("joint")
+        # Preferir el VCF anotado si existe: asi auto_rec_hom
+        # hereda CLNSIG/CLNDN del VCF anotado.
+        trio_vcf = (
+            state.vcfs.get("annotated")
+            or state.vcfs.get("trio")
+            or state.vcfs.get("joint")
+        )
         if trio_vcf is None:
             return None
         return PlannedAction(
