@@ -1,18 +1,28 @@
 # Handoff — PublicGenomicAgent
 
-**Última actualización**: 2026-10-04
+**Última actualización**: 2026-10-05
 **Estado**: Fase 2 al 100% (salvo item 2.2 bloqueado por descargas).
 
 ## Estado del repo
 
-- **Último commit**: 3ca947f (benchmark linear vs pangenome)
-- **Tests**: 119 passed (85 unit, 34 integration)
+- **Último commit**: 0c31431 (benchmark: pangenome wins on synthetic SD)
+- **Tests**: 120 passed (85 unit, 35 integration)
 - **CI**: verde (GitHub Actions)
 - **Branch**: main, sync con origin/main
 
 ## Qué se ha hecho
 
-### Sesión 2026-10-04 (última)
+### Sesión 2026-10-05 (última)
+- **Benchmark en duplicación segmentaria sintética** (chr1, tandem dup de 100 bp):
+  * Lineal (default): 0 variantes detectadas.
+  * Lineal (sin filtro MAPQ): 0 variantes detectadas.
+  * Pangenoma (vg): **1 variante, GT=1/1, DP=49, GQ=132**.
+  * `docs/benchmark_duplications.md`.
+- **Limpieza de disco**: de 18 GB a 30 GB libres (borrados BAMs de Osteopetrosis,
+  artefactos intermedios del benchmark, `pga-phenotype`).
+- **Test de integración del benchmark** lineal vs pangenoma.
+
+### Sesión 2026-10-04
 - Fix del pipeline con ClinVar: `_rule_annotate` corre antes de `_rule_mendelian`.
 - `_rule_mendelian` ahora prefiere `state.vcfs['annotated']`.
 - `_rule_prioritize` ahora prefiere `auto_rec_hom.vcf.gz`.
