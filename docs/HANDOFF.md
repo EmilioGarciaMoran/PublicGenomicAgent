@@ -1,18 +1,25 @@
 # Handoff — PublicGenomicAgent
 
-**Última actualización**: 2026-10-03
+**Última actualización**: 2026-10-04
 **Estado**: Fase 2 al 100% (salvo item 2.2 bloqueado por descargas).
 
 ## Estado del repo
 
-- **Último commit**: b6b3aa6
+- **Último commit**: b01a032 (fix pipeline with ClinVar)
 - **Tests**: 119 passed (85 unit, 34 integration)
 - **CI**: verde (GitHub Actions)
 - **Branch**: main, sync con origin/main
 
 ## Qué se ha hecho
 
-### Sesión 2026-10-03 (última)
+### Sesión 2026-10-04 (última)
+- Fix del pipeline con ClinVar: `_rule_annotate` corre antes de `_rule_mendelian`.
+- `_rule_mendelian` ahora prefiere `state.vcfs['annotated']`.
+- `_rule_prioritize` ahora prefiere `auto_rec_hom.vcf.gz`.
+- Primer run real: Osteopetrosis trio (chr8, hg19) en 19.6s con `--clinvar`.
+- `docs/demo_osteo_real.md` documenta el hito.
+
+### Sesión 2026-10-03
 - Añadido `prioritize_variants` en el pipeline (paso 13 con --clinvar).
 - Test end-to-end del pangenoma (`test_pangenome_pipeline.py`).
 - Actualizados `docs/quickstart.md`, `docs/backlog.md`, README.
