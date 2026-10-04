@@ -5,7 +5,7 @@
 
 ## Estado del repo
 
-- **Último commit**: 0c31431 (benchmark: pangenome wins on synthetic SD)
+- **Último commit**: 26a4cc0 (pitch formalizado) (benchmark: pangenome wins on synthetic SD)
 - **Tests**: 120 passed (85 unit, 35 integration)
 - **CI**: verde (GitHub Actions)
 - **Branch**: main, sync con origin/main
