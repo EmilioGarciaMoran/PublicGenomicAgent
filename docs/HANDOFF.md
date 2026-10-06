@@ -1,6 +1,6 @@
 # Handoff — PublicGenomicAgent
 
-**Última actualización**: 2026-10-05
+**Última actualización**: 2026-10-07
 **Estado**: Fase 2 al 100% (salvo item 2.2 bloqueado por descargas).
 
 ## Estado del repo
@@ -12,7 +12,15 @@
 
 ## Qué se ha hecho
 
-### Sesión 2026-10-05 (última)
+### Sesión 2026-10-07 (última)
+- **Enlace al pitch desde el README** (sección Documentation).
+- **Intento de extender el benchmark SD a 2 variantes** (bloqueado):
+  vg giraffe solo alinea 41/100 reads al grafo cuando hay 2 copias
+  de 200 bp con variantes. Documentado en docs/backlog.md.
+- **Benchmark con 1 variante sigue siendo el argumento fuerte**:
+  lineal 0, pangenoma 1 (GT=1/1, DP=49, GQ=132).
+
+### Sesión 2026-10-05
 - **Benchmark en duplicación segmentaria sintética** (chr1, tandem dup de 100 bp):
   * Lineal (default): 0 variantes detectadas.
   * Lineal (sin filtro MAPQ): 0 variantes detectadas.
