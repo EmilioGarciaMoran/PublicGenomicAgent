@@ -150,3 +150,19 @@ pga run-trio \\
     --case-id DEMO_TRIO --label DEMO1
 ```
 
+### Benchmark: 2-variant duplication (blocked)
+
+The synthetic SD benchmark works with 1 variant (chr1:1050 T>G,
+pangenome recovers it, linear misses it). Extending to 2 variants
+is blocked: vg giraffe only aligns 41/100 reads to the graph,
+regardless of paralog SNPs added to copy 2.
+
+Hypothesis: the graph with two 200 bp copies + alt paths is too
+large for giraffe with default parameters. Next steps:
+  - Try vg giraffe with --num-em-batch or lower --min-identity.
+  - Try with copies of 100 bp (as in the original benchmark)
+    but variants separated by 30 bp instead of 100 bp.
+  - Or accept the 1-variant benchmark as sufficient.
+
+The 1-variant benchmark is already documented in
+docs/benchmark_duplications.md and supports the pitch.
