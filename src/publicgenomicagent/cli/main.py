@@ -904,3 +904,85 @@ def igv(
         "está abierto en el puerto 60151 (por defecto).[/dim]"
     )
 
+# ----------------------------- sandbox ---------------------------------
+
+sandbox_app = typer.Typer(help="Consumir catalogos del proyecto Sandbox")
+app.add_typer(sandbox_app, name="sandbox")
+
+
+@sandbox_app.command("list")
+def sandbox_list(
+    root: str = typer.Argument(..., help="Directorio raiz del Sandbox"),
+) -> None:
+    """Lista los casos disponibles en un Sandbox."""
+    from publicgenomicagent.agent.sandbox import SandboxCatalog, SandboxError
+
+    try:
+        catalog = SandboxCatalog(Path(root))
+        cases = catalog.list_cases()
+    except SandboxError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(code=2)
+
+    table = Table(title=f"Sandbox: {len(cases)} casos")
+    table.add_column("Gene")
+    table.add_column("SPDI")
+    table.add_column("Zygosity (proband)")
+    table.add_column("BAMs")
+    table.add_column("HPO")
+    for c in cases:
+        zyg = c.zygosity.get("proband", "-")
+        bams_ok = "[green]3[/green]" if len(c.bams) == 3 else f"[yellow]{len(c.bams)}[/yellow]"
+        hpo = f"{len(c.hpo_expected)} terms" if c.hpo_expected else "[dim]-[/dim]"
+        table.add_row(c.gene, c.spdi, zyg, bams_ok, hpo)
+    console.print(table)
+
+@sandbox_app.command("describe")
+def sandbox_describe(
+    case_path: str = typer.Argument(..., help="Ruta al caso Sandbox"),
+) -> None:
+    """Muestra los detalles de un caso Sandbox."""
+    import yaml
+    from publicgenomicagent.agent.sandbox import SandboxCase
+
+    p = Path(case_path).expanduser().resolve()
+    manifest = p / "manifest.yaml"
+    if not manifest.exists():
+        console.print(f"[red]No es un caso Sandbox:[/red] {p}")
+        raise typer.Exit(code=2)
+
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    gene = data.get("gene", p.parent.name)
+    spdi = data.get("spdi", "")
+    gt = data.get("ground_truth", {}) or {}
+    bams = {}
+    bams_dir = p / "bams"
+    if bams_dir.exists():
+        for s in ("father", "mother", "proband"):
+            b = bams_dir / f"{s}.bam"
+            if b.exists():
+                bams[s] = b
+
+    case = SandboxCase(
+        case_id=f"{gene}:{spdi}",
+        gene=gene,
+        spdi=spdi,
+        title=data.get("title", ""),
+        clinical_text=data.get("clinical_text", ""),
+        chrom=gt.get("chrom", ""),
+        zygosity=gt.get("zygosity", {}) or {},
+        hpo_expected=data.get("hpo_expected", []) or [],
+        path=p,
+        bams=bams,
+    )
+
+    console.print(f"[bold]{case.gene}[/bold] -- {case.title}")
+    console.print(f"  case_id:   {case.case_id}")
+    console.print(f"  SPDI:      {case.spdi}")
+    console.print(f"  Chrom:     {case.chrom}")
+    console.print(f"  Zygosity:  {case.zygosity}")
+    console.print(f"  Expected genotypes: {case.expected_genotypes()}")
+    console.print(f"  BAMs:      {list(case.bams.keys())}")
+    console.print(f"  HPO:       {[h.get('code') for h in case.hpo_expected]}")
+    console.print(f"  Clinical:  {case.clinical_text}")
+
