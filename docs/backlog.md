@@ -94,6 +94,54 @@ evidence that the approach is better than linear.
 
 ---
 
+## Fase 2.5 — Integración Sandbox (completada)
+
+PublicGenomicAgent consume catálogos de casos sintéticos
+producidos por el proyecto paralelo **Sandbox**.
+
+### Contrato
+
+- Formato: `manifest.yaml` + BAMs del trío + referencia
+- Identificación por **SPDI canónico**
+- Nombrado de directorio: SPDI con `:` → `_`
+- Sin acoplamiento con el generador: PGA solo lee
+
+### Implementado
+
+| # | Item | Estado |
+|---|---|---|
+| 2.5.1 | Módulo `agent/sandbox.py` (SandboxCatalog + SandboxCase) | ✅ |
+| 2.5.2 | Conversión a `CaseManifest` (pedigrí, ROIs, HPO) | ✅ |
+| 2.5.3 | CLI `pga sandbox list` | ✅ |
+| 2.5.4 | CLI `pga sandbox describe` | ✅ |
+| 2.5.5 | CLI `pga sandbox run` (+ `--clinvar`, `--planner`) | ✅ |
+| 2.5.6 | Tests unitarios (16) | ✅ |
+| 2.5.7 | Test de integración end-to-end | ✅ |
+
+### Verificado
+
+```
+Caso CYP2D6 (Sandbox)
+  → pga sandbox run --reference test_ref.fa
+  → 12 iteraciones OK
+  → 1 variante recesiva detectada:
+     chr2:42128941 A>T
+     father 0/1, mother 0/1, proband 1/1
+  → auto_rec_hom, score 3.0
+```
+
+### Pendiente (proyecto Sandbox)
+
+- `ref.fa` en el contrato (autocontención del caso).
+- Bug: `ground_truth.chrom` de CYP2D6 (`chr2` → `chr22`).
+- Simular delecciones reales (CIGAR `D`) — NPHP1 no produce
+  variantes detectables hoy.
+
+### Pendiente (PGA)
+
+- `pga sandbox run --clinvar` end-to-end (13 pasos).
+- Tests de integración con `--planner llm`.
+
 ## Known issues / fixes pending
 
 - **`LLMPlanner` puro (LLM-first)**: `_resolve_paths` y orden
