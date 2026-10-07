@@ -162,6 +162,112 @@ Fallback determinista si el LLM falla.
 
 ---
 
+## Fábrica de casos: el proyecto Sandbox
+
+PublicGenomicAgent no depende de datos reales para validarse.
+Un **proyecto paralelo** (Sandbox) genera catálogos de casos
+sintéticos identificados por **SPDI canónico**, agrupados en
+tríos, con BAMs reales y ground truth.
+
+**Separación limpia por contrato**:
+
+- Sandbox **genera** los datos (responsabilidad del paralelo).
+- PGA **consume** los datos (responsabilidad del core).
+- El único punto de acoplamiento es `manifest.yaml`.
+- El generador es opaco para PGA: no sabe ni necesita saber
+  cómo se produce cada caso.
+
+**Casos actuales en el Sandbox**:
+
+| Gen | SPDI | Fenotipo | Proband |
+|---|---|---|---|
+| NPHP1 | `NC_000002.12:110800000:290000:` | Nefronoptisis | HOM_DEL |
+| CYP2D6 | `NC_000022.11:42128940:C:T` | Farmacogenómica | HOM_ALT |
+| CONTROL_NPHP1 | `NC_000002.12:110800000::` | Control sano | HOM_WT |
+
+**Consumo desde PGA**:
+
+```bash
+pga sandbox list ~/sandbox
+pga sandbox describe ~/sandbox/genes/NPHP1/NC_000002.12_110800000_290000_
+pga sandbox run ~/sandbox/genes/CYP2D6/NC_000022.11_42128940_C_T \
+    --reference ~/sandbox/test_ref.fa
+```
+
+**Por qué importa para el pitch**:
+
+1. **Validación sin datos de pacientes.** No necesitamos acceso
+   a cohortes reales para verificar que el pipeline funciona.
+2. **Reproducibilidad total.** Cada caso está identificado por
+   SPDI canónico. Dos máquinas generan el mismo caso.
+3. **Extensibilidad.** Añadir un caso nuevo es crear un
+   directorio, no modificar PGA.
+4. **Ground truth explícito.** Cada manifest define el
+   resultado esperado (`classification`, `genotypes`). Los
+   tests comparan contra eso automáticamente.
+
+**Verificado end-to-end**:
+
+```
+Caso CYP2D6 → PGA run-trio → 1 variante recesiva detectada
+  padre 0/1, madre 0/1, proband 1/1  →  auto_rec_hom  →  score 3.0
+```
+
+Cubierto por `tests/integration/test_sandbox_run.py`.
+
+## Fábrica de casos: el proyecto Sandbox
+
+PublicGenomicAgent no depende de datos reales para validarse.
+Un **proyecto paralelo** (Sandbox) genera catálogos de casos
+sintéticos identificados por **SPDI canónico**, agrupados en
+tríos, con BAMs reales y ground truth.
+
+**Separación limpia por contrato**:
+
+- Sandbox **genera** los datos (responsabilidad del paralelo).
+- PGA **consume** los datos (responsabilidad del core).
+- El único punto de acoplamiento es `manifest.yaml`.
+- El generador es opaco para PGA: no sabe ni necesita saber
+  cómo se produce cada caso.
+
+**Casos actuales en el Sandbox**:
+
+| Gen | SPDI | Fenotipo | Proband |
+|---|---|---|---|
+| NPHP1 | `NC_000002.12:110800000:290000:` | Nefronoptisis | HOM_DEL |
+| CYP2D6 | `NC_000022.11:42128940:C:T` | Farmacogenómica | HOM_ALT |
+| CONTROL_NPHP1 | `NC_000002.12:110800000::` | Control sano | HOM_WT |
+
+**Consumo desde PGA**:
+
+```bash
+pga sandbox list ~/sandbox
+pga sandbox describe ~/sandbox/genes/NPHP1/NC_000002.12_110800000_290000_
+pga sandbox run ~/sandbox/genes/CYP2D6/NC_000022.11_42128940_C_T \
+    --reference ~/sandbox/test_ref.fa
+```
+
+**Por qué importa para el pitch**:
+
+1. **Validación sin datos de pacientes.** No necesitamos acceso
+   a cohortes reales para verificar que el pipeline funciona.
+2. **Reproducibilidad total.** Cada caso está identificado por
+   SPDI canónico. Dos máquinas generan el mismo caso.
+3. **Extensibilidad.** Añadir un caso nuevo es crear un
+   directorio, no modificar PGA.
+4. **Ground truth explícito.** Cada manifest define el
+   resultado esperado (`classification`, `genotypes`). Los
+   tests comparan contra eso automáticamente.
+
+**Verificado end-to-end**:
+
+```
+Caso CYP2D6 → PGA run-trio → 1 variante recesiva detectada
+  padre 0/1, madre 0/1, proband 1/1  →  auto_rec_hom  →  score 3.0
+```
+
+Cubierto por `tests/integration/test_sandbox_run.py`.
+
 ## Qué nos diferencia
 
 | Aspecto | Pipeline clásico | Plataforma cloud | **PublicGenomicAgent** |
