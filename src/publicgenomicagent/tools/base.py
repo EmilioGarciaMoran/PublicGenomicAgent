@@ -398,7 +398,7 @@ class CaseManifest(BaseModel):
 class ExtractHPOInput(BaseModel):
     text: str
     output_dir: Path
-    backend: str = "local"                    # local | openrouter | api | azure | llama_cpp
+    backend: str = "local"                    # local | openrouter | api | azure | llama_cpp | pleio-hpo
     model_type: str = "mistral_24b"
     device: str = "auto"
     rdma_cache_dir: Path | None = None        # ~/.pga/cache/rdma

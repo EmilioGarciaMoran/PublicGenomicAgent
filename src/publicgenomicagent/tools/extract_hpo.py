@@ -165,7 +165,84 @@ def _write_runner(out_dir: Path) -> Path:
     return runner
 
 
+def _extract_hpo_pleio(inp: ExtractHPOInput) -> ExtractHPOOutput:
+    """Extrae HPO usando pleio-hpo (CPU-only, sin GPU).
+
+    Requiere el entorno pga-hpo-cpu con pleio-hpo instalado y los
+    assets descargados (~570 MB, una vez).
+    """
+    import subprocess
+    from ..env.micromamba import bin_path
+
+    python = bin_path("pga-hpo-cpu", "python")
+    if not python.exists():
+        raise FileNotFoundError(
+            f"Python de pga-hpo-cpu no encontrado: {python}. "
+            "Ejecuta: pga env bootstrap pga-hpo-cpu"
+        )
+
+    out_dir = Path(inp.output_dir).expanduser().resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Script que se ejecuta en pga-hpo-cpu
+    script = """
+import json
+import sys
+from pathlib import Path
+
+from pleio_hpo import Annotator
+
+text = sys.stdin.read()
+out_json = Path(sys.argv[1])
+
+annotator = Annotator()
+result = annotator.annotate(text)
+
+data = json.loads(result.to_json())
+out_json.write_text(json.dumps(data, indent=2))
+
+hpo_ids = [c["hpo_id"] for c in data.get("codes", [])]
+print(json.dumps({"hpo_ids": hpo_ids, "count": len(hpo_ids)}))
+"""
+
+    hpo_terms_json = out_dir / "hpo_terms.json"
+    proc = subprocess.run(
+        [str(python), "-c", script, str(hpo_terms_json)],
+        input=inp.text,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    summary = json.loads(proc.stdout.strip().splitlines()[-1])
+    hpo_ids = summary["hpo_ids"]
+
+    return ExtractHPOOutput(
+        ok=True,
+        tool="extract_hpo",
+        message=f"pleio-hpo: {len(hpo_ids)} terminos HPO",
+        outputs={"hpo_terms": str(hpo_terms_json)},
+        hpo_terms_json=hpo_terms_json,
+        entities_json=hpo_terms_json,
+        report_json=hpo_terms_json,
+        hpo_ids=hpo_ids,
+        counts={"total": len(hpo_ids)},
+    )
+
+
 def extract_hpo(inp: ExtractHPOInput) -> ExtractHPOOutput:
+    """Extrae terminos HPO de texto clinico.
+
+    Backends disponibles:
+      - pleio-hpo: CPU-only, offline (recomendado sin GPU).
+      - local/rdma: requiere GPU >=20 GB (backend original).
+    """
+    if inp.backend == "pleio-hpo":
+        return _extract_hpo_pleio(inp)
+    # Fallback al backend original (RDMA)
+    return _extract_hpo_rdma(inp)
+
+
+def _extract_hpo_rdma(inp: ExtractHPOInput) -> ExtractHPOOutput:
     """Extrae términos HPO de un texto clínico usando RDMA.
 
     Ejecuta RDMA en subproceso dentro del entorno pga-phenotype,

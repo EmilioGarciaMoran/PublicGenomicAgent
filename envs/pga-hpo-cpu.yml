@@ -1,0 +1,9 @@
+name: pga-hpo-cpu
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+    - pleio-hpo
+    - spacy
