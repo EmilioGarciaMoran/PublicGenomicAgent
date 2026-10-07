@@ -986,3 +986,153 @@ def sandbox_describe(
     console.print(f"  HPO:       {[h.get('code') for h in case.hpo_expected]}")
     console.print(f"  Clinical:  {case.clinical_text}")
 
+@sandbox_app.command("run")
+def sandbox_run(
+    case_path: str = typer.Argument(..., help="Ruta al caso Sandbox"),
+    reference: str = typer.Option(
+        None, "--reference", "-f",
+        help="FASTA de referencia (obligatorio si el caso no la incluye)",
+    ),
+    planner_kind: str = typer.Option(
+        "rule", "--planner", "-p",
+        help="rule | llm",
+    ),
+    clinvar: str = typer.Option(
+        None, "--clinvar",
+        help="VCF de ClinVar (opcional)",
+    ),
+    max_steps: int = typer.Option(20, "--max-steps"),
+) -> None:
+    """Ejecuta el pipeline de PGA sobre un caso Sandbox."""
+    import yaml
+    from publicgenomicagent.agent.loop import AgentLoop
+    from publicgenomicagent.agent.planner import (
+        RuleBasedPlanner, RuleFirstLLMPlanner,
+    )
+    from publicgenomicagent.agent.sandbox import SandboxCase
+    from publicgenomicagent.agent.state import AgentState, SessionContext
+    from publicgenomicagent.tools.base import (
+        CaseManifest, GenomicRange, IndividualSpec,
+    )
+
+    p = Path(case_path).expanduser().resolve()
+    manifest = p / "manifest.yaml"
+    if not manifest.exists():
+        console.print(f"[red]No es un caso Sandbox:[/red] {p}")
+        raise typer.Exit(code=2)
+
+    # Reference: case-local ref.fa or --reference
+    ref_path: Path | None = None
+    case_ref = p / "ref.fa"
+    if case_ref.exists():
+        ref_path = case_ref
+    elif reference:
+        ref_path = Path(reference).expanduser().resolve()
+    if ref_path is None or not ref_path.exists():
+        console.print(
+            "[red]Falta --reference[/red] (el contrato Sandbox no incluye ref.fa)"
+        )
+        raise typer.Exit(code=2)
+
+    # Load manifest
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    gene = data.get("gene", p.parent.name)
+    spdi = data.get("spdi", "")
+    gt = data.get("ground_truth", {}) or {}
+    chrom = gt.get("chrom", "")
+    zygosity = gt.get("zygosity", {}) or {}
+
+    bams: dict[str, Path] = {}
+    bams_dir = p / "bams"
+    for s in ("father", "mother", "proband"):
+        b = bams_dir / f"{s}.bam"
+        if b.exists():
+            bams[s] = b
+
+    # Build CaseManifest directly
+    pedigree: list[IndividualSpec] = []
+    if "father" in bams and "mother" in bams:
+        pedigree.append(IndividualSpec(sample="father", sex="M", affected=False))
+        pedigree.append(IndividualSpec(sample="mother", sex="F", affected=False))
+        proband_affected = zygosity.get("proband") in ("HOM_DEL", "HOM_ALT")
+        pedigree.append(IndividualSpec(
+            sample="proband", sex="U", affected=proband_affected,
+            father="father", mother="mother",
+        ))
+        proband = "proband"
+    else:
+        sample = next(iter(bams), "proband")
+        pedigree.append(IndividualSpec(sample=sample, sex="U", affected=True))
+        proband = sample
+        proband_affected = True
+
+    rois: list[GenomicRange] = []
+    if chrom and spdi:
+        try:
+            from publicgenomicagent.agent.sandbox import _parse_spdi
+            _refseq, pos, del_len, ins = _parse_spdi(spdi)
+            padding = 5000
+            start = max(1, pos - padding)
+            end = pos + max(del_len, len(ins)) + padding
+            rois.append(GenomicRange(chrom=chrom, start=start, end=end, label=gene))
+        except Exception:
+            pass
+
+    case_manifest = CaseManifest(
+        case_id=f"{gene}_{spdi.replace(':', '_')}",
+        source="clinical",
+        pedigree=pedigree,
+        proband=proband,
+        affected_samples=[proband] if proband_affected else [],
+        candidate_rois=rois,
+        hpo_terms={proband: [h.get("code") for h in data.get("hpo_expected", []) if h.get("code")]} if data.get("hpo_expected") else {},
+        candidate_genes=[gene],
+        consanguinity=False,
+        confidence=1.0,
+        extractor="sandbox",
+    )
+
+    # State
+    state = AgentState(case=case_manifest)
+    state.bams = bams
+    state.references["hg38"] = ref_path
+    if clinvar:
+        cv = Path(clinvar).expanduser().resolve()
+        if not cv.exists():
+            console.print(f"[red]ClinVar no existe:[/red] {cv}")
+            raise typer.Exit(code=2)
+        state.references["clinvar"] = cv
+
+    # Planner
+    if planner_kind == "rule":
+        planner = RuleBasedPlanner()
+    elif planner_kind == "llm":
+        from publicgenomicagent.agent.config import load_config
+        from publicgenomicagent.agent.llm_factory import build_llm_client
+        cfg = load_config().llm
+        planner = RuleFirstLLMPlanner(
+            client=build_llm_client(cfg),
+            rule=RuleBasedPlanner(),
+            include_paths=cfg.include_paths,
+        )
+    else:
+        console.print("[red]--planner debe ser rule o llm[/red]")
+        raise typer.Exit(code=2)
+
+    ctx = SessionContext(state=state, runtime=_runtime())
+    loop = AgentLoop(max_steps=max_steps, planner=planner)
+    results = loop.run(ctx)
+
+    console.print(f"[bold]{gene}[/bold] ({spdi})")
+    console.print(f"Loop: {len(results)} iteraciones")
+    for r in results:
+        if r.executed:
+            console.print(f"  [green]OK[/green] {r.tool_name}")
+        else:
+            console.print(f"  [yellow].[/yellow] {r.step_name}: {r.skipped_reason}")
+
+    out_json = Path("results") / f"{case_manifest.case_id}.session.json"
+    state.to_json(out_json)
+    console.print()
+    console.print(f"[green]Estado:[/green] {out_json}")
+
