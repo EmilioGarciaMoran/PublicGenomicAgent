@@ -203,6 +203,39 @@ results/      generated outputs (git-ignored)
 data/         user data (git-ignored)
 ```
 
+## Sandbox integration
+
+PublicGenomicAgent consumes synthetic case catalogs produced by
+Sandbox, a separate project that generates trio BAMs + manifests
+from SPDI notation. The contract is explicit: PGA reads
+`manifest.yaml` + BAMs + reference; the generator is opaque.
+
+```bash
+pga sandbox list ~/sandbox
+pga sandbox describe ~/sandbox/genes/NPHP1/NC_000002.12_110800000_290000_
+pga sandbox run ~/sandbox/genes/CYP2D6/NC_000022.11_42128940_C_T \
+    --reference ~/sandbox/test_ref.fa
+```
+
+Example (CYP2D6 trio, pharmacogenomic variant):
+
+```
+CYP2D6 (NC_000022.11:42128940:C:T)
+Loop: 12 iteraciones
+  OK qc_bam  (x3)
+  OK fetch_roi  (x3)
+  OK call_variants  (x3)
+  OK joint_call
+  OK mendelian_filter
+  OK prioritize_variants
+```
+
+Result: one recessive candidate at `chr2:42128941 A>T` with the
+expected genotypes (`father 0/1`, `mother 0/1`, `proband 1/1`).
+
+The full pipeline is covered by
+`tests/integration/test_sandbox_run.py`.
+
 ## Documentation
 
 Design notes:
