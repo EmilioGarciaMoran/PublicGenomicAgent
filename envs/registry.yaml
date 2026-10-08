@@ -12,6 +12,9 @@ envs:
   pga-mendelian:
     manifest: envs/pga-mendelian.yml
     description: "plink + bcftools para análisis mendeliano"
+  pga-hpo-cpu:
+    manifest: envs/pga-hpo-cpu.yml
+    description: "pleio-hpo (extracción HPO CPU-only, sin GPU)"
   pga-phenotype:
     manifest: envs/pga-phenotype.yml
     description: "RDMA + transformers para extracción HPO/ORPHA"
