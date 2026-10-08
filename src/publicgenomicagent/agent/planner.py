@@ -100,6 +100,14 @@ class RuleBasedPlanner:
             self._rule_joint_call,
             self._rule_annotate,
             self._rule_mendelian,
+            self._rule_extract_hpo,
+            self._rule_phenotype_ranking,
+            self._rule_qc,
+            self._rule_fetch_roi,
+            self._rule_call_variants,
+            self._rule_joint_call,
+            self._rule_annotate,
+            self._rule_mendelian,
             self._rule_prioritize,
         ):
             action = rule(state)
@@ -347,11 +355,54 @@ class RuleBasedPlanner:
         )
 
 
+    def _rule_extract_hpo(self, state: AgentState) -> PlannedAction | None:
+        """Extrae HPO del texto clinico si hay texto pero no HPO codes."""
+        case = state.case
+        if not case.phenotype_text:
+            return None
+        if state.calls_of("extract_hpo"):
+            return None
+        proband = case.proband or next(iter(case.phenotype_text), None)
+        if proband is None:
+            return None
+        text = case.phenotype_text.get(proband, "")
+        if not text:
+            return None
+        output_dir = Path.cwd() / "results" / "hpo"
+        return PlannedAction(
+            tool_name="extract_hpo",
+            args={"text": text, "output_dir": output_dir, "backend": "pleio-hpo"},
+            rationale="Texto clinico presente; extraemos HPO sin GPU.",
+        )
+
+    def _rule_phenotype_ranking(self, state: AgentState) -> PlannedAction | None:
+        """Ejecuta phenotype_ranking si hay HPO codes."""
+        if state.calls_of("phenotype_ranking"):
+            return None
+        hpo_ids = []
+        for sample_hpos in state.case.hpo_terms.values():
+            hpo_ids.extend(sample_hpos)
+        if not hpo_ids:
+            eh = state.latest("extract_hpo")
+            if eh and eh.get("hpo_ids"):
+                hpo_ids = list(eh["hpo_ids"])
+        if not hpo_ids:
+            return None
+        output_dir = Path.cwd() / "results" / "phenotype_ranking"
+        return PlannedAction(
+            tool_name="phenotype_ranking",
+            args={"hpo_ids": hpo_ids, "output_dir": output_dir},
+            rationale=f"Hay {len(hpo_ids)} terminos HPO; priorizamos enfermedades.",
+        )
+
 # ---------------------------------------------------------------------------
 # LLMPlanner
 # ---------------------------------------------------------------------------
 
 @dataclass
+
+
+
 class LLMPlanner:
     """Planner basado en LLM con validación estricta y fallback.
 

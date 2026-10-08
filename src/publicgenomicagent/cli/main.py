@@ -1001,6 +1001,10 @@ def sandbox_run(
         None, "--clinvar",
         help="VCF de ClinVar (opcional)",
     ),
+    hpo_text: str = typer.Option(
+        None, "--hpo-text",
+        help="Texto clinico para extraer HPO (backend pleio-hpo, CPU)",
+    ),
     max_steps: int = typer.Option(20, "--max-steps"),
 ) -> None:
     """Ejecuta el pipeline de PGA sobre un caso Sandbox."""
@@ -1078,6 +1082,15 @@ def sandbox_run(
         except Exception:
             pass
 
+    # HPO: del manifest de Sandbox o del --hpo-text
+    hpo_terms_pre = {}
+    if data.get("hpo_expected"):
+        hpo_terms_pre[proband] = [h.get("code") for h in data["hpo_expected"] if h.get("code")]
+
+    phenotype_text_pre = {}
+    if hpo_text:
+        phenotype_text_pre[proband] = hpo_text
+
     case_manifest = CaseManifest(
         case_id=f"{gene}_{spdi.replace(':', '_')}",
         source="clinical",
@@ -1085,7 +1098,8 @@ def sandbox_run(
         proband=proband,
         affected_samples=[proband] if proband_affected else [],
         candidate_rois=rois,
-        hpo_terms={proband: [h.get("code") for h in data.get("hpo_expected", []) if h.get("code")]} if data.get("hpo_expected") else {},
+        hpo_terms=hpo_terms_pre,
+        phenotype_text=phenotype_text_pre,
         candidate_genes=[gene],
         consanguinity=False,
         confidence=1.0,
