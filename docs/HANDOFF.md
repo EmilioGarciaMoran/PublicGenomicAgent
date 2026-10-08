@@ -71,3 +71,10 @@ git pull
 # Pipeline completo (13 pasos)
 /home/egarmo/bin/micromamba run -p ~/.pga/envs/pga-core \
   pga run-trio ... --clinvar ~/clinvar.vcf.gz
+
+## Estado actual (2026-10-08)
+
+- Commit: `91b75b1` — docs(readme): add Benchmarks section
+- Tests unitarios: **110 passed** en ~20 s (`pytest tests/unit/ -q`)
+- Herramientas registradas: `align_to_graph`, `annotate_variants`, `build_local_graph`, ...
+- Resume de sesión: `/tmp/pga_resume_20261008.txt`
