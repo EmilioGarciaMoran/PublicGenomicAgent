@@ -98,7 +98,7 @@ A single command runs the entire analysis:
     --case-id DEMO_TRIO --label DEMO1
 ```
 
-The loop executes **11 automatic steps** (or 13 with ClinVar):
+The loop executes **12 automatic steps** (or 13 with ClinVar):
 
 ```
 qc_bam              x 3   (one per BAM)
@@ -106,6 +106,7 @@ fetch_roi           x 3   (one per sample, over the ROI)
 call_variants       x 3   (one per sub-BAM)
 joint_call          x 1   (multi-sample VCF)
 mendelian_filter    x 1   (segregation analysis)
+prioritize_variants x 1   (clinical scoring)
 ```
 
 The final state is saved to `results/DEMO_TRIO.session.json`.
@@ -125,6 +126,51 @@ Get ClinVar (GRCh38, ~100 MB):
 
     wget https://ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh38/clinvar.vcf.gz
     wget https://ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh38/clinvar.vcf.gz.tbi
+
+### 5c. Four execution flows
+
+PublicGenomicAgent has four ways to run, from simplest to full:
+
+| Flow | Command | Steps | Use case |
+|---|---|---|---|
+| **A** | `pga run-trio ...` | 12 | minimal trio |
+| **B** | `pga run-trio ... --clinvar ...` | 13 | + ClinVar annotation |
+| **C** | `pga run-trio ... --hpo-text "..."` | 14 | + phenotype + LIRICAL |
+| **D** | `pga sandbox run <case> --reference ... --clinvar ... --hpo-text "..."` | 15 | full flow on a Sandbox case |
+
+**Flow B — with ClinVar annotation:**
+
+```bash
+pga run-trio ... --clinvar ~/clinvar.vcf.gz
+```
+
+Adds `annotate_variants`: the joint VCF is annotated with
+ClinVar significance (CLNSIG, CLNDN, CLNREVSTAT).
+
+**Flow C — with clinical text (HPO + LIRICAL):**
+
+```bash
+pga run-trio ... --hpo-text "Patient with renal failure and polyuria."
+```
+
+Adds two steps:
+- `extract_hpo`: extracts HPO codes from the text (CPU backend
+  `pleio-hpo`, no GPU required).
+- `phenotype_ranking`: runs LIRICAL to rank candidate diseases.
+
+**Flow D — Sandbox case with everything:**
+
+```bash
+pga sandbox run ~/sandbox/genes/CYP2D6/NC_000022.11_42128940_C_T \
+    --reference ~/sandbox/test_ref.fa \
+    --clinvar ~/clinvar.vcf.gz \
+    --hpo-text "Patient with adverse drug response."
+```
+
+Combines a Sandbox-generated trio with all extensions. Runtime:
+~12 seconds on a laptop.
+
+**All four flows run 100% CPU-only, without network access.**
 
 ## 6. Inspect the results
 
