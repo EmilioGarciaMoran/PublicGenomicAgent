@@ -203,6 +203,50 @@ results/      generated outputs (git-ignored)
 data/         user data (git-ignored)
 ```
 
+## Benchmarks
+
+Two quantitative benchmarks are documented in full:
+
+### Benchmark A — Linear vs pangenome (no segmental duplications)
+
+**Data**: Osteopetrosis trio (Galaxy Training, chr8, hg19).
+**Region**: `chr8:1000000-2000000`.
+
+| Pipeline | Variants detected |
+|---|---|
+| Linear (`bcftools call`) | 102 |
+| Local pangenome (`vg`) | 91 |
+| Shared | 76 |
+| Concordance | 83.5% |
+
+**Conclusion**: comparable. The pangenome is more conservative
+(excludes ~20 low-quality artifacts from the linear pipeline),
+but does not add new variants.
+
+Full report: [`docs/benchmark_linear_vs_pangenome.md`](docs/benchmark_linear_vs_pangenome.md)
+
+### Benchmark B — Linear vs pangenome (with segmental duplication)
+
+**Data**: synthetic reference with a tandem duplication of 100 bp.
+**Reads**: 50 reads covering the duplicated region, all carrying
+the variant `chr1:1050 T>G` (hom alt), all with **MAPQ=0**
+(simulating alignment ambiguity).
+
+| Pipeline | Variants detected | Genotype |
+|---|---|---|
+| Linear (default) | 0 | — |
+| Linear (no MAPQ filter) | 0 | — |
+| **Local pangenome (vg)** | **1** | **1/1, DP=49, GQ=132** |
+
+**Conclusion**: in regions with segmental duplications, the
+linear pipeline loses the pathogenic variant. The pangenome
+recovers it with high confidence.
+
+Full report: [`docs/benchmark_duplications.md`](docs/benchmark_duplications.md)
+
+**Bottom line**: the pangenome is not always better; it is
+decisive where it matters (SDs, LCRs) and neutral elsewhere.
+
 ## Sandbox integration
 
 PublicGenomicAgent consumes synthetic case catalogs produced by
