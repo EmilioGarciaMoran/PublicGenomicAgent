@@ -117,10 +117,12 @@ Add --clinvar for the 13-step pipeline (annotation + prioritisation):
 
     pga run-trio ... --clinvar ~/clinvar.vcf.gz
 
-The two extra steps are:
+The extra step is:
 
     annotate_variants    x 1   (copy CLNSIG, CLNDN from ClinVar)
-    prioritize_variants  x 1   (score variants by clinical relevance)
+
+(The joint VCF is annotated before mendelian_filter, so
+auto_rec_hom and prioritize_variants inherit the ClinVar fields.)
 
 Get ClinVar (GRCh38, ~100 MB):
 
