@@ -642,8 +642,15 @@ def run_trio(
         None, "--clinvar",
         help="VCF de ClinVar (opcional). Si se pasa, se anota el VCF final.",
     ),
+    hpo_text: str = typer.Option(
+        None, "--hpo-text",
+        help="Texto clinico para extraer HPO (backend pleio-hpo, CPU)",
+    ),
 ) -> None:
     """Ejecuta el loop agéntico sobre un trío.
+
+    Con --hpo-text, extrae los terminos HPO del texto y prioriza
+    enfermedades candidatas (LIRICAL) antes del análisis genómico.
 
     Con --planner rule (default), usa el RuleBasedPlanner determinista.
     Con --planner llm, usa el LLMPlanner contra el Ollama local; si el
@@ -671,6 +678,9 @@ def run_trio(
         roi=roi,
         reference_fasta=Path(reference),
     )
+
+    if hpo_text:
+        case.phenotype_text = {"proband": hpo_text}
 
     state = AgentState(case=case)
     state.bams = {

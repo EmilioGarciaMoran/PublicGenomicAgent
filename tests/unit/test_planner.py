@@ -499,3 +499,105 @@ def test_rule_annotate_skipped_after_success(tmp_path: Path):
     p = RuleBasedPlanner()
     assert p._rule_annotate(state) is None
 
+# ---------------------------------------------------------------------------
+# RuleBasedPlanner: _rule_extract_hpo
+# ---------------------------------------------------------------------------
+
+def test_rule_extract_hpo_fires_when_text_present(tmp_path: Path):
+    """Sin hpo_terms pero con phenotype_text, dispara extract_hpo."""
+    case = CaseManifest(
+        case_id="T",
+        phenotype_text={"proband": "Patient with polyuria and polydipsia."},
+    )
+    state = AgentState(case=case)
+    p = RuleBasedPlanner()
+    action = p._rule_extract_hpo(state)
+    assert action is not None
+    assert action.tool_name == "extract_hpo"
+    assert action.args["backend"] == "pleio-hpo"
+    assert "polyuria" in action.args["text"]
+
+
+def test_rule_extract_hpo_skips_without_text(tmp_path: Path):
+    """Sin phenotype_text, no dispara."""
+    case = CaseManifest(case_id="T")
+    state = AgentState(case=case)
+    p = RuleBasedPlanner()
+    assert p._rule_extract_hpo(state) is None
+
+
+def test_rule_extract_hpo_skips_after_execution(tmp_path: Path):
+    """Si ya se ha ejecutado extract_hpo, no insiste."""
+    case = CaseManifest(
+        case_id="T",
+        phenotype_text={"proband": "Some text."},
+    )
+    state = AgentState(case=case)
+    state.record(
+        tool_name="extract_hpo",
+        inp={"text": "Some text."},
+        out={"ok": True},
+        duration_ms=1,
+    )
+    p = RuleBasedPlanner()
+    assert p._rule_extract_hpo(state) is None
+
+
+# ---------------------------------------------------------------------------
+# RuleBasedPlanner: _rule_phenotype_ranking
+# ---------------------------------------------------------------------------
+
+def test_rule_phenotype_ranking_fires_with_hpo_terms(tmp_path: Path):
+    """Con hpo_terms en el CaseManifest, dispara phenotype_ranking."""
+    case = CaseManifest(
+        case_id="T",
+        hpo_terms={"proband": ["HP:0000103", "HP:0001959"]},
+    )
+    state = AgentState(case=case)
+    p = RuleBasedPlanner()
+    action = p._rule_phenotype_ranking(state)
+    assert action is not None
+    assert action.tool_name == "phenotype_ranking"
+    assert "HP:0000103" in action.args["hpo_ids"]
+
+
+def test_rule_phenotype_ranking_skips_without_hpo(tmp_path: Path):
+    """Sin hpo_terms ni output de extract_hpo, no dispara."""
+    case = CaseManifest(case_id="T")
+    state = AgentState(case=case)
+    p = RuleBasedPlanner()
+    assert p._rule_phenotype_ranking(state) is None
+
+
+def test_rule_phenotype_ranking_uses_extract_hpo_output(tmp_path: Path):
+    """Si no hay hpo_terms pero sí output de extract_hpo, usa sus IDs."""
+    case = CaseManifest(case_id="T")
+    state = AgentState(case=case)
+    state.record(
+        tool_name="extract_hpo",
+        inp={"text": "..."},
+        out={"ok": True, "hpo_ids": ["HP:0000103"]},
+        duration_ms=1,
+    )
+    p = RuleBasedPlanner()
+    action = p._rule_phenotype_ranking(state)
+    assert action is not None
+    assert "HP:0000103" in action.args["hpo_ids"]
+
+
+def test_rule_phenotype_ranking_skips_after_execution(tmp_path: Path):
+    """Si ya se ha ejecutado phenotype_ranking, no insiste."""
+    case = CaseManifest(
+        case_id="T",
+        hpo_terms={"proband": ["HP:0000103"]},
+    )
+    state = AgentState(case=case)
+    state.record(
+        tool_name="phenotype_ranking",
+        inp={"hpo_ids": ["HP:0000103"]},
+        out={"ok": True},
+        duration_ms=1,
+    )
+    p = RuleBasedPlanner()
+    assert p._rule_phenotype_ranking(state) is None
+
