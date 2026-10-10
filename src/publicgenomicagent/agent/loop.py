@@ -23,11 +23,13 @@ ningún step puede correr, o cuando se alcanza `max_steps`.
 """
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
 from ..tools.base import CaseManifest, GenomicRange
+from .events import Event
 from .planner import Planner
 from .state import AgentState, SessionContext
 
@@ -359,6 +361,83 @@ class AgentLoop:
             ctx.state.note(f"loop alcanzó max_steps={self.max_steps}")
         return results
 
+    def stream(self, ctx: SessionContext) -> Iterator[Event]:
+        """Como `run()`, pero emite un `Event` por cada paso.
+
+        Garantiza que el orden de `tool_name` emitidos coincide con el
+        de `run()` para el mismo `ctx` y estado inicial. No sustituye
+        a `run()`; lo complementa para consumo incremental (UI, logs).
+        """
+        for i in range(self.max_steps):
+            if self.planner is not None:
+                action = self.planner.next_action(ctx.state)
+                if action is not None:
+                    yield Event(
+                        kind="step_start",
+                        payload={"source": "planner", "tool": action.tool_name},
+                    )
+                    yield Event(
+                        kind="tool_call",
+                        payload={"name": action.tool_name, "args": action.args},
+                    )
+                    try:
+                        out = ctx.call_tool(action.tool_name, **action.args)
+                        yield Event(
+                            kind="tool_result",
+                            payload={
+                                "name": action.tool_name,
+                                "ok": True,
+                                "output": _safe_dump(out),
+                            },
+                        )
+                    except Exception as e:  # noqa: BLE001
+                        yield Event(
+                            kind="tool_result",
+                            payload={
+                                "name": action.tool_name,
+                                "ok": False,
+                                "error": str(e),
+                            },
+                        )
+                        yield Event(kind="error", payload={"message": str(e)})
+                        break
+                    ctx.state.note(
+                        f"step planner:{action.tool_name} → {action.tool_name} OK"
+                    )
+                    continue
+
+            step_result = self._run_one(ctx)
+            if step_result is None:
+                ctx.state.note(f"loop terminado tras {i} iteraciones")
+                yield Event(kind="final", payload={"steps": i})
+                return
+            if step_result.executed and step_result.tool_name:
+                yield Event(
+                    kind="tool_result",
+                    payload={
+                        "name": step_result.tool_name,
+                        "ok": True,
+                        "step": step_result.step_name,
+                    },
+                )
+                ctx.state.note(
+                    f"step {step_result.step_name} → {step_result.tool_name} OK"
+                )
+            elif step_result.skipped_reason:
+                yield Event(
+                    kind="note",
+                    payload={
+                        "text": f"{step_result.step_name} saltado: "
+                                f"{step_result.skipped_reason}"
+                    },
+                )
+        else:
+            ctx.state.note(f"loop alcanzó max_steps={self.max_steps}")
+            yield Event(
+                kind="final",
+                payload={"steps": self.max_steps, "reason": "max_steps"},
+            )
+
     def _run_one(self, ctx: SessionContext) -> StepResult | None:
         """Ejecuta la siguiente acción.
 
@@ -427,3 +506,9 @@ def build_trio_case(
         affected_samples=["proband"],
         candidate_rois=[roi],
     )
+
+
+def _safe_dump(obj: Any) -> Any:
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump(mode="json")
+    return obj

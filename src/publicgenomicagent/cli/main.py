@@ -1160,3 +1160,23 @@ def sandbox_run(
     console.print()
     console.print(f"[green]Estado:[/green] {out_json}")
 
+
+
+@app.command("chat")
+def chat_cmd(
+    case: Path | None = typer.Option(
+        None, "--case", "-c", help="Manifest del caso (JSON). Sin esto, modo adhoc."
+    ),
+    llm: bool = typer.Option(
+        False, "--llm", help="Usar LLMPlanner (Ollama local) en vez de reglas."
+    ),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Mostrar args de tools y notas del loop."
+    ),
+) -> None:
+    """REPL conversacional sobre el loop agéntico."""
+    from publicgenomicagent.ui.chat import run_chat
+
+    raise SystemExit(
+        run_chat(case_path=case, use_llm=llm, verbose=verbose)
+    )
