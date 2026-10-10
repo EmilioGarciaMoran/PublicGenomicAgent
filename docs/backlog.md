@@ -214,3 +214,34 @@ large for giraffe with default parameters. Next steps:
 
 The 1-variant benchmark is already documented in
 docs/benchmark_duplications.md and supports the pitch.
+## [Día 2] Tool: `detect_homozygous_regions` (ROH restringido a panel)
+
+**Motivo**: el diferenciador declarado del proyecto es soberanía + casos
+consanguíneos. Un detector de regiones de homocigosidad aparente dentro
+del panel convierte ese diferenciador en algo cuantificable y auditable.
+
+**No es un ROH caller genómico.** Los paneles de genes no tienen densidad
+de SNPs suficiente para estimar F_ROH global ni mapear ROH largos (>8 Mb).
+La tool detecta "regiones de homocigosidad aparente" dentro de la zona
+panelada, como heurística de priorización de variantes recesivas
+homocigotas.
+
+**Implementación prevista**:
+- `src/publicgenomicagent/tools/roh.py` con Pydantic I/O.
+- Wrapper de `bcftools roh` (no PLINK: más falsos positivos en panel).
+- Parámetros conservadores: 2–3 het permitidos, longitud mínima 1–2 Mb.
+- Cruce con BED del panel para anotar genes solapados.
+- Campo `caveat` **obligatorio** en el output: "estimación restringida
+  al panel, no interpretable como F_ROH genómico".
+- Evento UI `roh_summary` + render propio (distinto de tool_result).
+- Test unitario con VCF sintético (subprocess mockeado) + test de
+  integración marcado `slow`.
+- Escenario documentado en `docs/use_cases.md`: "consanguinidad sospechada".
+
+**Pregunta abierta antes de implementar**: ¿el VCF de entrada trae `PL`
+en FORMAT o solo `GT`? Determina si `bcftools roh` corre con likelihoods
+o solo con genotipos llamados. Verificar con:
+`bcftools query -f '%FORMAT\n' <vcf> | head`
+
+**Bloqueante**: no empezar hasta que Día 1 esté commiteado y `pga chat`
+arranque con Ollama.
