@@ -129,7 +129,6 @@ def _has_roi_bams(state: AgentState) -> bool:
     rois = _rois_for_case(state)
     if not samples or not rois:
         return False
-    # Marcamos como hecho si existe un fetch_roi por (sample, roi)
     fetch_calls = state.calls_of("fetch_roi")
     done_pairs = set()
     for c in fetch_calls:
@@ -181,8 +180,6 @@ def _plan_fetch_roi(state: AgentState) -> tuple[str, dict[str, Any]] | None:
     if not rois or not samples:
         return None
 
-    # Recorremos en orden deterministico (sample, roi) y devolvemos
-    # el primer par que aún no tenga sub-BAM generado.
     fetch_calls = state.calls_of("fetch_roi")
     done_pairs = {
         (c.input.get("bam_path"), c.input.get("region")) for c in fetch_calls
@@ -226,8 +223,6 @@ def _plan_call_variants(state: AgentState) -> tuple[str, dict[str, Any]] | None:
     if not rois or not samples:
         return None
 
-    # Necesitamos un sub-BAM por sample y ROI, y aún no haber llamado
-    # variantes para esa ROI.
     if not _has_roi_bams(state):
         return None
 
@@ -240,11 +235,6 @@ def _plan_call_variants(state: AgentState) -> tuple[str, dict[str, Any]] | None:
         if region in called_regions:
             continue
 
-        # Tomamos el primer sample con sub-BAM disponible para esta ROI
-        # como "representante" del call (call_variants opera sobre un BAM).
-        # En un caso real, el joint calling requiere multi-sample BAM, que
-        # es un paso aparte. Aquí invocamos call_variants por ROI sobre el
-        # primer sample, y dejamos constancia en las notas.
         for sample in samples:
             bam = state.bams.get(sample)
             if bam is None:
@@ -255,7 +245,7 @@ def _plan_call_variants(state: AgentState) -> tuple[str, dict[str, Any]] | None:
                 continue
             ref = state.references.get("hg38") or state.references.get("ref")
             if ref is None:
-                return None  # sin referencia, no se puede llamar
+                return None
             out_vcf = sub_bam.with_suffix(".vcf.gz")
             return (
                 "call_variants",
@@ -287,7 +277,7 @@ def _plan_mendelian(state: AgentState) -> tuple[str, dict[str, Any]] | None:
     if trio_vcf is None:
         return None
     if state.has_tool("mendelian_filter"):
-        return None  # ya ejecutado
+        return None
 
     out_dir = Path.cwd() / "results" / "mendelian"
     return (
@@ -337,7 +327,6 @@ class AgentLoop:
     ):
         self.steps = steps if steps is not None else DEFAULT_STEPS
         self.max_steps = max_steps
-        # Si hay planner, decide él. Si no, se usan los steps.
         self.planner = planner
 
     def run(self, ctx: SessionContext) -> list[StepResult]:
@@ -364,53 +353,22 @@ class AgentLoop:
     def stream(self, ctx: SessionContext) -> Iterator[Event]:
         """Como `run()`, pero emite un `Event` por cada paso.
 
-        Garantiza que el orden de `tool_name` emitidos coincide con el
-        de `run()` para el mismo `ctx` y estado inicial. No sustituye
-        a `run()`; lo complementa para consumo incremental (UI, logs).
+        Delega toda la decisión (planner o steps) a `_run_one`, que ya
+        la resuelve. No llama al planner dos veces: el único punto de
+        entrada es `_run_one`, igual que en `run()`.
         """
         for i in range(self.max_steps):
-            if self.planner is not None:
-                action = self.planner.next_action(ctx.state)
-                if action is not None:
-                    yield Event(
-                        kind="step_start",
-                        payload={"source": "planner", "tool": action.tool_name},
-                    )
-                    yield Event(
-                        kind="tool_call",
-                        payload={"name": action.tool_name, "args": action.args},
-                    )
-                    try:
-                        out = ctx.call_tool(action.tool_name, **action.args)
-                        yield Event(
-                            kind="tool_result",
-                            payload={
-                                "name": action.tool_name,
-                                "ok": True,
-                                "output": _safe_dump(out),
-                            },
-                        )
-                    except Exception as e:  # noqa: BLE001
-                        yield Event(
-                            kind="tool_result",
-                            payload={
-                                "name": action.tool_name,
-                                "ok": False,
-                                "error": str(e),
-                            },
-                        )
-                        yield Event(kind="error", payload={"message": str(e)})
-                        break
-                    ctx.state.note(
-                        f"step planner:{action.tool_name} → {action.tool_name} OK"
-                    )
-                    continue
+            try:
+                step_result = self._run_one(ctx)
+            except Exception as e:  # noqa: BLE001
+                yield Event(kind="error", payload={"message": str(e)})
+                return
 
-            step_result = self._run_one(ctx)
             if step_result is None:
                 ctx.state.note(f"loop terminado tras {i} iteraciones")
                 yield Event(kind="final", payload={"steps": i})
                 return
+
             if step_result.executed and step_result.tool_name:
                 yield Event(
                     kind="tool_result",
@@ -431,12 +389,16 @@ class AgentLoop:
                                 f"{step_result.skipped_reason}"
                     },
                 )
-        else:
-            ctx.state.note(f"loop alcanzó max_steps={self.max_steps}")
-            yield Event(
-                kind="final",
-                payload={"steps": self.max_steps, "reason": "max_steps"},
-            )
+                ctx.state.note(
+                    f"step {step_result.step_name} saltado: "
+                    f"{step_result.skipped_reason}"
+                )
+
+        ctx.state.note(f"loop alcanzó max_steps={self.max_steps}")
+        yield Event(
+            kind="final",
+            payload={"steps": self.max_steps, "reason": "max_steps"},
+        )
 
     def _run_one(self, ctx: SessionContext) -> StepResult | None:
         """Ejecuta la siguiente acción.
