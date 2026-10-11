@@ -1180,3 +1180,47 @@ def chat_cmd(
     raise SystemExit(
         run_chat(case_path=case, use_llm=llm, verbose=verbose)
     )
+
+
+@app.command("audit")
+def audit_cmd(
+    session: Path = typer.Argument(..., help="Ruta al session.json a auditar"),
+    json_output: bool = typer.Option(
+        False, "--json", help="Emitir el informe como JSON (no humano)."
+    ),
+    verify: bool = typer.Option(
+        False, "--verify", help="Validar integridad (exit 1 si hay problemas)."
+    ),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Incluir args completos y outputs."
+    ),
+) -> None:
+    """Audita un session.json: tools, notas y (opcional) integridad."""
+    import json as _json
+
+    from rich.console import Console
+
+    from publicgenomicagent.audit import (
+        load_session,
+        render_human,
+        to_dict,
+        verify_session,
+    )
+
+    try:
+        sess = load_session(session)
+    except (FileNotFoundError, ValueError) as e:
+        typer.echo(f"error: {e}", err=True)
+        raise typer.Exit(code=2)
+
+    if json_output:
+        payload = to_dict(sess)
+        if verify:
+            payload["integrity_issues"] = verify_session(sess)
+        typer.echo(_json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        console = Console()
+        render_human(sess, console, verbose=verbose, with_verify=verify)
+
+    if verify and verify_session(sess):
+        raise typer.Exit(code=1)
