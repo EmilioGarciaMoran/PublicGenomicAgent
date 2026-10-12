@@ -245,3 +245,19 @@ o solo con genotipos llamados. Verificar con:
 
 **Bloqueante**: no empezar hasta que Día 1 esté commiteado y `pga chat`
 arranque con Ollama.
+## [Día 3+] Sembrar variantes reales en el caso demo
+
+El caso demo (`cases/demo_trio/`) genera BAMs con reads aleatorios,
+así que `call_variants` produce ~20 000 variantes ruidosas y
+`mendelian_filter` las filtra todas (0 auto_rec_hom, 0 auto_dom, etc.).
+
+Para que el caso sirva también para demos clínicas (pitch, Alkuraya),
+`scripts/make_demo_case.py` debería plantar variantes concretas:
+  - Una variante auto-recesiva homocigota en el proband.
+  - Los padres HET en la misma posición.
+  - Idealmente dentro de la ROI (chr2:40000-60000).
+
+Eso permite verificar que `mendelian_filter` produce al menos 1
+`auto_rec_hom_vcf` con contenido, y `prioritize_variants` puntúa algo.
+
+Coste estimado: ~1 hora. Toca `make_bam()` en el script.
