@@ -1,6 +1,7 @@
 """REPL conversacional sobre AgentLoop.stream()."""
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -17,6 +18,27 @@ console = Console()
 
 SESSIONS_DIR = Path("sessions")
 
+_REF_GLOBS = ("*.fa", "*.fasta", "*.fa.gz", "*.fasta.gz")
+
+
+def _discover_bams(case_dir: Path) -> dict[str, Path]:
+    """Convención: <case_dir>/bams/<sample>.bam -> {sample: path}."""
+    bams_dir = case_dir / "bams"
+    if not bams_dir.is_dir():
+        return {}
+    return {bam.stem: bam for bam in sorted(bams_dir.glob("*.bam"))}
+
+
+def _discover_reference(case_dir: Path) -> dict[str, Path]:
+    """Convención: <case_dir>/ref/<algo>.fa -> {"ref": path}."""
+    ref_dir = case_dir / "ref"
+    if not ref_dir.is_dir():
+        return {}
+    for pattern in _REF_GLOBS:
+        for fa in sorted(ref_dir.glob(pattern)):
+            return {"ref": fa}
+    return {}
+
 
 def _build_context(
     case_path: Path | None,
@@ -25,16 +47,38 @@ def _build_context(
     """Construye SessionContext + planner.
 
     Sin --case, se usa un CaseManifest mínimo ("adhoc") sin BAMs ni ROIs.
+    Con --case, se cargan BAMs y referencia por convención de directorio
+    (<case_dir>/bams/*.bam y <case_dir>/ref/*.fa*).
     Sin --llm, el planner es RuleBasedPlanner (determinista, sin red).
     """
+    # Runtime bioinformático: resuelve binarios (samtools, bcftools, ...)
+    # en sus entornos aislados. Reutilizamos el patrón de cli/main.py.
+    from ..cli.main import _runtime as _build_runtime
+
     if case_path is not None:
-        import json
+        if not case_path.exists():
+            raise FileNotFoundError(f"no existe el manifest: {case_path}")
         raw = json.loads(case_path.read_text(encoding="utf-8"))
         manifest = CaseManifest.model_validate(raw)
+
+        case_dir = case_path.parent
+        bams = _discover_bams(case_dir)
+        references = _discover_reference(case_dir)
+
+        state = AgentState(case=manifest, bams=bams, references=references)
+
+        if bams:
+            console.print(
+                f"[dim]· {len(bams)} BAM(s) cargados: "
+                f"{', '.join(sorted(bams))}[/dim]"
+            )
+        if references:
+            console.print(
+                f"[dim]· referencia: {next(iter(references.values()))}[/dim]"
+            )
     else:
         manifest = CaseManifest(case_id="adhoc")
-
-    state = AgentState(case=manifest)
+        state = AgentState(case=manifest)
 
     planner: object | None = None
     if use_llm:
@@ -44,11 +88,11 @@ def _build_context(
 
         cfg = load_config()
         client = build_llm_client(cfg.llm)
-        planner = LLMPlanner(client)  # ajusta si la firma requiere fallback
+        planner = LLMPlanner(client)
     else:
         planner = RuleBasedPlanner()
 
-    ctx = SessionContext(state=state)
+    ctx = SessionContext(state=state, runtime=_build_runtime())
     return ctx, planner
 
 
