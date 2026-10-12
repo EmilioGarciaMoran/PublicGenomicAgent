@@ -7,31 +7,61 @@ on:
     branches: [main]
 
 jobs:
-  unit-tests:
+  unit:
     name: Unit tests (Python ${{ matrix.python }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         python: ["3.11", "3.12"]
-
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python }}
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-
       - name: Install package and dev deps
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-
       - name: Run unit tests
         run: pytest tests/unit/ -v
 
-      - name: Run integration tests
-        run: pytest tests/integration/ -v -m integration
-        continue-on-error: true
+  smoke-e2e:
+    name: Smoke E2E (micromamba)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
+      - name: Install micromamba
+        uses: mamba-org/setup-micromamba@v1
+        with:
+          # No creamos envs aquí; setup.sh lo hace con nombres custom
+          # en ~/.pga. Solo necesitamos el binario micromamba en PATH.
+          create-args: ""
+          init-shell: bash
+
+      - name: Bootstrap pga-core + tool envs
+        run: ./setup.sh
+
+      - name: Generate demo case
+        run: ~/.pga/envs/pga-core/bin/python scripts/make_demo_case.py
+
+      - name: Smoke E2E
+        run: |
+          export PATH="$HOME/.pga/envs/pga-core/bin:$PATH"
+          echo "analiza el caso" | pga chat --case cases/demo_trio/manifest.json
+          SESSION=$(ls -t sessions/ | head -n 1)
+          pga audit "sessions/$SESSION/session.json" --verify
+          ~/.pga/envs/pga-core/bin/python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          sessions = sorted(Path("sessions").iterdir())
+          latest = sessions[-1]
+          d = json.loads((latest / "session.json").read_text())
+          n = len(d["tool_calls"])
+          ok = sum(1 for c in d["tool_calls"] if c["ok"])
+          assert n >= 10, f"solo {n} tool_calls"
+          assert ok == n, f"{n-ok} tool_calls fallidas"
+          print(f"OK: {n} tool_calls, todas ok")
+          PY
