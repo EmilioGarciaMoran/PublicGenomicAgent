@@ -45,3 +45,12 @@ results/*
 *.bed
 DelRigorEnLaCiencia.pdf
 sessions/
+
+# Caso demo: generado con scripts/make_demo_case.py (ver README)
+cases/demo_trio/bams/
+cases/demo_trio/ref/
+cases/demo_trio/manifest.json
+cases/demo_trio.bak_bamaker/
+
+# Runtime outputs
+results/
