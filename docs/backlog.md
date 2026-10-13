@@ -261,3 +261,15 @@ Eso permite verificar que `mendelian_filter` produce al menos 1
 `auto_rec_hom_vcf` con contenido, y `prioritize_variants` puntúa algo.
 
 Coste estimado: ~1 hora. Toca `make_bam()` en el script.
+## [Día 3+] Actualizar actions de CI cuando migren a Node 24
+
+GitHub ha deprecado Node 20. Los jobs de CI emiten warnings:
+- actions/checkout@v4
+- actions/setup-python@v5
+- mamba-org/setup-micromamba@v1
+
+Cuando salgan las versiones con Node 24, actualizar los `uses:` del
+workflow. No urgente: hoy solo son warnings cosméticos.
+
+También: `ubuntu-latest` migra a Ubuntu 26 en octubre de 2026.
+Revisar que los entornos micromamba sigan resolviendo sin cambios.
