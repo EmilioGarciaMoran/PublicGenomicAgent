@@ -440,3 +440,51 @@ class PhenotypeRankingOutput(ToolOutput):
     top_candidates: list[dict] = []
     counts: dict[str, int] = {}
     report_json: Path
+
+
+# --- detect_homozygous_regions ----------------------------------------
+
+class HomozygousRegion(BaseModel):
+    """Una región de homocigosidad aparente detectada en un VCF.
+
+    No es un ROH genómico: es una región del VCF de entrada donde el
+    modelo HMM de bcftools clasifica el genotipo como autozigoto.
+    """
+    sample: str
+    chrom: str
+    start: int
+    end: int
+    length_bp: int
+    length_kb: float
+    n_markers: int                # número de marcadores informativos
+    quality: float                # score medio fwd-bwd del HMM
+    genes_overlapping: list[str] = []   # relleno futuro con BED del panel
+
+
+class DetectHomozygousRegionsInput(BaseModel):
+    """Input para detect_homozygous_regions.
+
+    Ejecuta `bcftools roh` por cada sample del VCF (o por los samples
+    indicados) y devuelve regiones filtradas por umbrales conservadores.
+
+    IMPORTANTE: los paneles de genes no tienen densidad de SNPs
+    suficiente para estimar F_ROH genómico. Esta tool es una heurística
+    de priorización, no un ROH caller clínico.
+    """
+    vcf: Path
+    output_dir: Path
+    samples: list[str] = []           # si vacío, todos los del VCF
+    min_length_kb: int = 100          # ROH mínimos en kb
+    min_snps: int = 10                # marcadores informativos mínimos
+    min_quality: float = 10.0         # score medio mínimo del HMM
+    skip_indels: bool = True          # -I en bcftools roh
+    panel_bed: Path | None = None     # BED del panel (aún sin usar)
+
+
+class DetectHomozygousRegionsOutput(ToolOutput):
+    regions: list[HomozygousRegion] = []
+    samples_analyzed: list[str] = []
+    total_regions: int = 0
+    total_mb: float = 0.0
+    f_roh_proxy: float = 0.0          # total_mb / n_samples
+    caveat: str = ""

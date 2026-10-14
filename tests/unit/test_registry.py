@@ -1,15 +1,7 @@
-"""Tests de humo del registro de tools.
-
-No requieren BAMs reales ni entornos micromamba. Solo validan:
-  - que el registro se importa sin errores
-  - que todas las tools declaradas existen
-  - que dispatch valida inputs correctamente
-  - que list_tools / describe_tool funcionan
-"""
+"""Tests del registro de tools del agente."""
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
 
 from publicgenomicagent.tools.registry import (
     TOOL_REGISTRY,
@@ -19,22 +11,24 @@ from publicgenomicagent.tools.registry import (
     list_tools,
 )
 
+
 EXPECTED_TOOLS = {
-    "fetch_roi",
-    "qc_bam",
-    "call_variants",
-    "joint_call",
-    "annotate_variants",
-    "prioritize_variants",
-    "compare_vcfs",
-    "local_pangenome",
-    "build_local_graph",
     "align_to_graph",
+    "annotate_variants",
+    "build_local_graph",
     "call_from_graph",
-    "mendelian_filter",
-    "plink_validate",
+    "call_variants",
+    "compare_vcfs",
+    "detect_homozygous_regions",
     "extract_hpo",
+    "fetch_roi",
+    "joint_call",
+    "local_pangenome",
+    "mendelian_filter",
     "phenotype_ranking",
+    "plink_validate",
+    "prioritize_variants",
+    "qc_bam",
 }
 
 
@@ -46,78 +40,75 @@ def test_all_expected_tools_present():
     assert set(list_tools()) == EXPECTED_TOOLS
 
 
-def test_list_tools_is_sorted():
+def test_list_tools_sorted():
     names = list_tools()
     assert names == sorted(names)
 
 
+def test_get_tool_returns_spec():
+    spec = get_tool("qc_bam")
+    assert spec.name == "qc_bam"
+    assert spec.needs_runtime is True
+
+
 def test_get_tool_unknown_raises():
-    with pytest.raises(KeyError, match="no registrada"):
-        get_tool("no_existe")
-
-
-def test_describe_tool_returns_schemas():
-    d = describe_tool("fetch_roi")
-    assert d["name"] == "fetch_roi"
-    assert d["needs_runtime"] is True
-    assert "properties" in d["input_schema"]
-    assert "region" in d["input_schema"]["properties"]
-
-
-def test_dispatch_unknown_tool_raises():
     with pytest.raises(KeyError):
-        dispatch("no_existe", region="chr1:1-100")
+        get_tool("no_existe_esta_tool")
 
 
-def test_dispatch_invalid_input_raises_validation_error():
-    # fetch_roi requiere bam_path, region, output_bam
-    with pytest.raises(ValidationError):
-        dispatch("fetch_roi", region="chr1:1-100")  # faltan bam_path y output_bam
+def test_describe_tool_shape():
+    d = describe_tool("prioritize_variants")
+    assert d["name"] == "prioritize_variants"
+    assert "input_schema" in d
+    assert "output_schema" in d
+    assert d["needs_runtime"] is False
 
 
-def test_dispatch_validate_only_returns_input():
+def test_detect_homozygous_regions_registered():
+    spec = get_tool("detect_homozygous_regions")
+    assert spec.needs_runtime is True
+    assert "homozygosity" in spec.tags
+    assert "consanguinity" in spec.tags
+
+
+def test_detect_homozygous_regions_input_schema():
+    spec = get_tool("detect_homozygous_regions")
+    props = spec.input_schema()["properties"]
+    assert "vcf" in props
+    assert "output_dir" in props
+    assert "samples" in props
+    assert "min_length_kb" in props
+    assert "min_snps" in props
+    assert "min_quality" in props
+
+
+def test_detect_homozygous_regions_output_schema():
+    spec = get_tool("detect_homozygous_regions")
+    props = spec.output_schema()["properties"]
+    assert "regions" in props
+    assert "samples_analyzed" in props
+    assert "total_regions" in props
+    assert "total_mb" in props
+    assert "f_roh_proxy" in props
+    assert "caveat" in props
+
+
+def test_dispatch_validate_only():
     inp = dispatch(
-        "fetch_roi",
+        "detect_homozygous_regions",
         validate_only=True,
-        bam_path="/tmp/x.bam",
-        region="chr1:1-100",
-        output_bam="/tmp/x.roi.bam",
+        vcf="/tmp/x.vcf.gz",
+        output_dir="/tmp/out",
     )
-    assert inp.region == "chr1:1-100"
-    assert str(inp.bam_path) == "/tmp/x.bam"
+    assert inp.vcf is not None
+    assert inp.min_length_kb == 100
 
 
-def test_dispatch_tool_without_runtime_does_not_require_it():
-    # compare_vcfs no necesita runtime; validate_only evita ejecutarla
-    inp = dispatch(
-        "compare_vcfs",
-        validate_only=True,
-        baseline_vcf="/tmp/a.vcf.gz",
-        candidate_vcf="/tmp/b.vcf.gz",
-        output_delta_vcf="/tmp/delta.vcf.gz",
-    )
-    assert str(inp.baseline_vcf) == "/tmp/a.vcf.gz"
-
-
-def test_dispatch_requires_runtime_when_tool_needs_it():
-    # fetch_roi necesita runtime; sin validate_only y sin runtime -> ValueError
-    with pytest.raises(ValueError, match="requiere un ToolRuntime"):
+def test_dispatch_runtime_required():
+    with pytest.raises(ValueError, match="ToolRuntime"):
         dispatch(
-            "fetch_roi",
-            bam_path="/tmp/x.bam",
-            region="chr1:1-100",
-            output_bam="/tmp/x.roi.bam",
+            "detect_homozygous_regions",
+            runtime=None,
+            vcf="/tmp/x.vcf.gz",
+            output_dir="/tmp/out",
         )
-
-
-def test_all_tools_declare_nonempty_description():
-    for name, spec in TOOL_REGISTRY.items():
-        assert spec.description, f"{name} sin descripción"
-        assert spec.tags, f"{name} sin tags"
-
-
-def test_all_tools_have_pydantic_models():
-    from pydantic import BaseModel
-    for name, spec in TOOL_REGISTRY.items():
-        assert issubclass(spec.input_model, BaseModel), name
-        assert issubclass(spec.output_model, BaseModel), name

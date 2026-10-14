@@ -34,6 +34,8 @@ from .base import (
     CallVariantsOutput,
     CompareVCFsInput,
     CompareVCFsOutput,
+    DetectHomozygousRegionsInput,
+    DetectHomozygousRegionsOutput,
     JointCallInput,
     JointCallOutput,
     PrioritizeVariantsInput,
@@ -58,6 +60,7 @@ from .annotate import annotate_variants
 from .prioritize import prioritize_variants
 from .call_variants import call_variants, joint_call
 from .compare_vcfs import compare_vcfs
+from .roh import detect_homozygous_regions
 from .extract_hpo import extract_hpo
 from .fetch_roi import fetch_roi
 from .local_graph import align_to_graph, build_local_graph, call_from_graph
@@ -153,6 +156,20 @@ TOOL_REGISTRY: dict[str, ToolSpec] = {
         tags=("variants", "diff"),
     ),
 
+    # --- Homozygosity / ROH -------------------------------------------
+    "detect_homozygous_regions": ToolSpec(
+        name="detect_homozygous_regions",
+        func=detect_homozygous_regions,
+        input_model=DetectHomozygousRegionsInput,
+        output_model=DetectHomozygousRegionsOutput,
+        needs_runtime=True,
+        description=(
+            "Detecta regiones de homocigosidad aparente (bcftools roh) "
+            "en un VCF. Heurística de priorización, no F_ROH genómico."
+        ),
+        tags=("variants", "homozygosity", "consanguinity"),
+    ),
+
     # --- Grafos locales / pangenoma -----------------------------------
     "local_pangenome": ToolSpec(
         name="local_pangenome",
@@ -239,11 +256,9 @@ def list_tools() -> list[str]:
 
 
 def get_tool(name: str) -> ToolSpec:
+    """Devuelve el ToolSpec de una tool o levanta KeyError."""
     if name not in TOOL_REGISTRY:
-        raise KeyError(
-            f"Tool '{name}' no registrada. "
-            f"Disponibles: {', '.join(list_tools())}"
-        )
+        raise KeyError(f"Tool no registrada: {name}")
     return TOOL_REGISTRY[name]
 
 
@@ -270,10 +285,9 @@ def dispatch(
     """Ejecuta una tool por nombre, con validación Pydantic automática.
 
     Args:
-        tool_name: nombre registrado (p.ej. "fetch_roi").
-        runtime: ToolRuntime, requerido si la tool lo necesita.
-        validate_only: si True, solo construye y valida el input,
-                       sin ejecutar la tool. Útil para tests y dry-run.
+        tool_name: nombre de la tool.
+        runtime: ToolRuntime si la tool lo requiere.
+        validate_only: si True, solo valida el input y lo devuelve.
         **kwargs: campos del modelo de input.
 
     Returns:
