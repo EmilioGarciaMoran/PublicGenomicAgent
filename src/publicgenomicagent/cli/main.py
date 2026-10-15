@@ -1224,3 +1224,93 @@ def audit_cmd(
 
     if verify and verify_session(sess):
         raise typer.Exit(code=1)
+
+
+
+
+# ----------------------------- case ------------------------------------
+
+case_app = typer.Typer(help="Gestión de CaseManifest")
+app.add_typer(case_app, name="case")
+
+
+@case_app.command("parse")
+def case_parse(
+    text_file: Path = typer.Argument(
+        ..., help="Fichero con el relato clínico en texto libre (EN/ES)."
+    ),
+    output_dir: Path = typer.Option(
+        ..., "--out", "-o", help="Directorio donde escribir el manifest.json."
+    ),
+    case_id: str = typer.Option(
+        None, "--case-id", help="ID del caso (si se omite, se deriva del texto)."
+    ),
+    json_output: bool = typer.Option(
+        False, "--json", help="Imprimir el manifest completo como JSON."
+    ),
+) -> None:
+    """Extrae un CaseManifest estructurado de un relato clínico.
+
+    El relato se procesa con un LLM local (por defecto qwen2.5:7b vía
+    Ollama). El resultado se valida contra el modelo CaseManifest y se
+    escribe a disco como JSON. Si algún sample del pedigrí no aparece
+    literalmente en el texto, se reporta como warning.
+    """
+    import json as _json
+
+    from publicgenomicagent.tools.base import NLToCaseManifestInput
+    from publicgenomicagent.tools.case_manifest import nl_to_case_manifest
+
+    # Leer el fichero de entrada
+    p = Path(text_file).expanduser().resolve()
+    if not p.exists():
+        typer.echo(f"error: no existe el fichero {p}", err=True)
+        raise typer.Exit(code=2)
+
+    text = p.read_text(encoding="utf-8")
+    if not text.strip():
+        typer.echo(f"error: el fichero {p} está vacío", err=True)
+        raise typer.Exit(code=2)
+
+    # Preparar input
+    inp = NLToCaseManifestInput(
+        text=text,
+        case_id=case_id,
+        output_dir=Path(output_dir).expanduser().resolve(),
+    )
+
+    # Llamar a la tool (dispatch con runtime porque needs_runtime=True)
+    try:
+        result = nl_to_case_manifest(_runtime(), inp)
+    except Exception as e:  # noqa: BLE001
+        typer.echo(f"error: {type(e).__name__}: {e}", err=True)
+        raise typer.Exit(code=1)
+
+    # Imprimir resumen
+    console.print(f"[bold]{result.message}[/bold]")
+    if result.manifest_json:
+        console.print(f"[dim]manifest:[/dim] {result.manifest_json}")
+
+    if result.samples_found:
+        console.print(
+            f"[dim]samples verificados:[/dim] "
+            f"{', '.join(result.samples_found)}"
+        )
+    if result.samples_unverified:
+        console.print(
+            f"[yellow]samples NO verificados:[/yellow] "
+            f"{', '.join(result.samples_unverified)}"
+        )
+    if result.warnings:
+        for w in result.warnings:
+            console.print(f"[yellow]· {w}[/yellow]")
+
+    # Si --json, imprimir el manifest completo
+    if json_output and result.manifest:
+        typer.echo(
+            _json.dumps(
+                result.manifest.model_dump(mode="json"),
+                indent=2,
+                ensure_ascii=False,
+            )
+        )

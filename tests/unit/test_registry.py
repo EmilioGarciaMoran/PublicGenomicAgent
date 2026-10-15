@@ -25,6 +25,7 @@ EXPECTED_TOOLS = {
     "joint_call",
     "local_pangenome",
     "mendelian_filter",
+    "nl_to_case_manifest",
     "phenotype_ranking",
     "plink_validate",
     "prioritize_variants",

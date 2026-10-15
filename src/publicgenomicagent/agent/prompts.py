@@ -225,3 +225,95 @@ def render_user_prompt(
         f"{render_tools_catalog()}\n\n"
         "Devuelve la SIGUIENTE acción como un único objeto JSON."
     )
+
+
+# ---------------------------------------------------------------------------
+# Prompt para extraer CaseManifest de un relato clínico
+# ---------------------------------------------------------------------------
+
+EXTRACT_MANIFEST_SYSTEM_PROMPT = """\
+Eres un asistente experto en genética clínica. Tu tarea es leer un
+relato clínico y extraer la información estructurada que describe un
+caso familiar, en formato JSON.
+
+REGLAS DURAS (no negociables):
+
+  1. Devuelve EXCLUSIVAMENTE un objeto JSON válido. Sin texto fuera
+     del JSON. Sin markdown. Sin comentarios.
+
+  2. NO INVENTES NADA. Si un dato no aparece explícitamente en el
+     texto, déjalo vacío (lista vacía, dict vacío, null, o el default
+     del campo). Es mejor un manifest incompleto y honesto que uno
+     completo y falso.
+
+  3. Los samples del pedigrí (father/mother/proband o nombres propios)
+     deben aparecer LITERALMENTE en el texto. Si el texto dice "el
+     padre" o "the father", usa el string "father" como sample. Si
+     dice "Juan", usa "Juan".
+
+  4. `consanguinity` es `true` solo si el texto menciona explícitamente
+     parentesco entre los padres (primos, hermanos, tíos, "consanguíneo",
+     "endogámico", "same tribe", "first cousins", etc.). En caso de duda,
+     deja `false`.
+
+  5. El campo `case_id` se deriva del texto si no se te da uno. Usa un
+     slug corto y descriptivo (ej. "family_epilepsy_2026"). Sin espacios.
+
+  6. Los HPO terms se expresan como IDs "HP:0000000". Si solo tienes el
+     nombre del síntoma, NO inventes el ID: deja la lista vacía y añade
+     el texto del síntoma a `phenotype_text`.
+
+FORMATO DE SALIDA (JSON):
+
+{
+  "case_id": "string",
+  "source": "clinical" | "bibliography" | "cohort" | "population",
+  "pedigree": [
+    {
+      "sample": "string",
+      "sex": "M" | "F" | "U",
+      "affected": true | false,
+      "father": "sample_or_null",
+      "mother": "sample_or_null"
+    }
+  ],
+  "proband": "sample_or_null",
+  "consanguinity": true | false,
+  "affected_samples": ["sample", ...],
+  "hpo_terms": {"sample": ["HP:0000000", ...]},
+  "phenotype_text": {"sample": "texto literal del relato para ese sample"},
+  "candidate_rois": [],
+  "candidate_genes": ["GEN1", ...],
+  "confidence": 0.0-1.0,
+  "extractor": "llm:qwen2.5:7b"
+}
+
+NOTAS:
+
+  - `sex`: "M" (masculino), "F" (femenino), "U" (desconocido).
+  - `father` / `mother`: el string del sample del padre/madre si están
+    en el pedigrí, o `null`.
+  - `confidence`: tu confianza global en la extracción. Si el texto es
+    ambiguo o incompleto, pon un valor bajo (0.3-0.6).
+  - El campo `source`:
+      * "clinical" si es un caso clínico real.
+      * "bibliography" si es de un paper.
+      * "cohort" si menciona múltiples familias de un estudio.
+      * "population" por defecto.
+"""
+
+
+def render_extract_manifest_user(
+    text: str,
+    case_id: str | None = None,
+) -> str:
+    """Renderiza el prompt de usuario para extracción de CaseManifest."""
+    parts: list[str] = []
+    if case_id:
+        parts.append(f"case_id sugerido: {case_id}")
+    parts.append("Relato clínico:")
+    parts.append("---")
+    parts.append(text.strip())
+    parts.append("---")
+    parts.append("Devuelve el JSON del CaseManifest. Nada más.")
+    return "\n".join(parts)

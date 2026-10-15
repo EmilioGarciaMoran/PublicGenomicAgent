@@ -36,6 +36,8 @@ from .base import (
     CompareVCFsOutput,
     DetectHomozygousRegionsInput,
     DetectHomozygousRegionsOutput,
+    NLToCaseManifestInput,
+    NLToCaseManifestOutput,
     JointCallInput,
     JointCallOutput,
     PrioritizeVariantsInput,
@@ -61,6 +63,7 @@ from .prioritize import prioritize_variants
 from .call_variants import call_variants, joint_call
 from .compare_vcfs import compare_vcfs
 from .roh import detect_homozygous_regions
+from .case_manifest import nl_to_case_manifest
 from .extract_hpo import extract_hpo
 from .fetch_roi import fetch_roi
 from .local_graph import align_to_graph, build_local_graph, call_from_graph
@@ -226,6 +229,19 @@ TOOL_REGISTRY: dict[str, ToolSpec] = {
         needs_runtime=False,
         description="Validación con PLINK: errores Mendel, IBD, sexo.",
         tags=("family", "qc"),
+    ),
+    # --- Extracción desde lenguaje natural ----------------------------
+    "nl_to_case_manifest": ToolSpec(
+        name="nl_to_case_manifest",
+        func=nl_to_case_manifest,
+        input_model=NLToCaseManifestInput,
+        output_model=NLToCaseManifestOutput,
+        needs_runtime=True,
+        description=(
+            "Extrae un CaseManifest estructurado de un relato clínico "
+            "en lenguaje natural (EN/ES) usando un LLM local."
+        ),
+        tags=("nlp", "manifest", "llm"),
     ),
 
     # --- Fenotipo -----------------------------------------------------

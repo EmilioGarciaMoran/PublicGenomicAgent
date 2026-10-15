@@ -488,3 +488,25 @@ class DetectHomozygousRegionsOutput(ToolOutput):
     total_mb: float = 0.0
     f_roh_proxy: float = 0.0          # total_mb / n_samples
     caveat: str = ""
+
+
+# --- nl_to_case_manifest ----------------------------------------------
+
+class NLToCaseManifestInput(BaseModel):
+    """Input para extraer un CaseManifest de un relato clínico.
+
+    El texto puede estar en inglés o español. El LLM extrae pedigrí,
+    fenotipo, consanguinidad, genes y regiones candidatas. Si algo no
+    aparece en el texto, se deja vacío (no se inventa).
+    """
+    text: str                          # relato clínico en texto libre
+    case_id: str | None = None         # si None, se deriva del texto
+    output_dir: Path                   # dónde escribir manifest.json
+
+
+class NLToCaseManifestOutput(ToolOutput):
+    manifest: "CaseManifest | None" = None   # ver nota abajo
+    manifest_json: Path | None = None
+    samples_found: list[str] = []
+    samples_unverified: list[str] = []  # samples que el LLM inventó
+    warnings: list[str] = []
