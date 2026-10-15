@@ -273,3 +273,40 @@ workflow. No urgente: hoy solo son warnings cosméticos.
 
 También: `ubuntu-latest` migra a Ubuntu 26 en octubre de 2026.
 Revisar que los entornos micromamba sigan resolviendo sin cambios.
+## [Día 5+] Diagnosticar JSON truncado en nl_to_case_manifest
+
+La tool `nl_to_case_manifest` falla con modelos pequeños (qwen2.5:3b
+y 7b) porque el LLM devuelve un JSON truncado a mitad. Síntomas:
+
+- El output empieza correctamente con '{' y los primeros campos.
+- Se corta en medio de un string o de un objeto.
+- `_extract_json_block` no encuentra un bloque balanceado.
+
+Hipótesis a verificar:
+
+1. **num_predict insuficiente**: subir a 3000 y probar de nuevo.
+2. **El LLM se queda sin contexto**: `num_ctx` es 8192, el prompt
+   ~1500 tokens, el output ~800-1000 tokens. Debería caber, pero
+   Ollama puede reservar memoria de otra forma.
+3. **El LLM añade texto antes/después del JSON** que rompe el parser:
+   capturar la respuesta cruda y ver.
+4. **El LLM emite `null` como string** en algunos campos (`affected: null`
+   en lugar de `false`), lo que Pydantic rechazaría — pero el error
+   actual es de parseo, no de validación.
+
+Plan de diagnóstico:
+
+- Añadir un flag `--debug` a `pga case parse` que imprima la respuesta
+  cruda del LLM antes de parsear.
+- O añadir un `logging.debug` en `nl_to_case_manifest` que guarde la
+  respuesta a un fichero `raw_llm_response.txt` en el output_dir.
+
+Coste estimado: 1-2 horas.
+
+Prioridad: alta. Bloquea la utilidad real de la tool.
+
+Nota sobre hardware:
+- Con 15 GB RAM total, `qwen2.5:7b` + num_ctx:8192 no cabe y hace swap.
+- `qwen2.5:3b` sí cabe, pero tarda ~2 min por manifest en CPU.
+- Para el pitch: el pipeline escala el modelo según los recursos
+  disponibles (3b en portátil, 7b+ en servidor con GPU)."""
