@@ -36,11 +36,6 @@ def save_case_manifest(manifest: CaseManifest, path: Path) -> Path:
 def case_manifest_to_pedigree(
     manifest: CaseManifest,
 ) -> list[IndividualSpec]:
-    """Extrae el pedigrí del manifiesto.
-
-    Si no hay pedigrí, lanza error. El pipeline debe verificar
-    manifest.has_pedigree() antes de invocar tools que lo requieran.
-    """
     if not manifest.has_pedigree():
         raise ValueError(
             f"CaseManifest '{manifest.case_id}' no tiene pedigrí completo "
@@ -50,11 +45,6 @@ def case_manifest_to_pedigree(
 
 
 def case_manifest_to_rois(manifest: CaseManifest) -> list[GenomicRange]:
-    """Extrae los ROIs del manifiesto.
-
-    Si no hay ROIs pero hay fenotipo, el sistema debería derivarlos
-    consultando HPO -> genes. Esa lógica vive fuera de esta función.
-    """
     if not manifest.has_rois():
         raise ValueError(
             f"CaseManifest '{manifest.case_id}' no tiene candidate_rois. "
@@ -65,7 +55,6 @@ def case_manifest_to_rois(manifest: CaseManifest) -> list[GenomicRange]:
 
 
 def case_manifest_to_hpo_terms(manifest: CaseManifest) -> dict[str, list[str]]:
-    """Devuelve el mapa sample -> [HPO IDs]."""
     if not manifest.has_phenotype():
         raise ValueError(
             f"CaseManifest '{manifest.case_id}' no tiene fenotipo. "
@@ -79,13 +68,9 @@ def case_manifest_to_hpo_terms(manifest: CaseManifest) -> dict[str, list[str]]:
 # ---------------------------------------------------------------------
 
 def capabilities(manifest: CaseManifest) -> dict[str, bool]:
-    """Devuelve qué análisis se pueden hacer con este manifiesto.
-
-    Útil para que el agente decida qué tools invocar.
-    """
     return {
         "fetch_roi": manifest.has_rois(),
-        "call_variants": manifest.has_rois(),      # necesita un ROI
+        "call_variants": manifest.has_rois(),
         "mendelian_filter": manifest.has_pedigree(),
         "plink_validate": manifest.has_pedigree(),
         "phenotype_ranking": manifest.has_phenotype(),
@@ -109,7 +94,6 @@ def from_fam(
     hpo_terms: dict[str, list[str]] | None = None,
     candidate_rois: list[GenomicRange] | None = None,
 ) -> CaseManifest:
-    """Construye un CaseManifest a partir de un .fam de PLINK."""
     from .pedigree import load_pedigree_from_fam
 
     pedigree = load_pedigree_from_fam(fam_path)
@@ -135,11 +119,6 @@ def minimal_from_roi(
     end: int,
     label: str = "",
 ) -> CaseManifest:
-    """Caso mínimo: solo un ROI, sin pedigrí ni fenotipo.
-
-    Útil para estudios poblacionales, análisis exploratorios, o
-    validación de variantes conocidas.
-    """
     return CaseManifest(
         case_id=case_id,
         source="population",
@@ -157,10 +136,6 @@ def minimal_from_phenotype(
     hpo_terms: list[str],
     phenotype_text: str = "",
 ) -> CaseManifest:
-    """Caso mínimo: solo fenotipo, sin pedigrí ni ROI.
-
-    El sistema debe derivar ROIs por HPO -> genes.
-    """
     return CaseManifest(
         case_id=case_id,
         source="bibliography",
@@ -176,30 +151,33 @@ def minimal_from_phenotype(
 # Extracción desde lenguaje natural
 # ---------------------------------------------------------------------
 
-import re as _re
+# Strings que el LLM a veces emite como valores en lugar de null real
+_NULL_LIKE = {"null", "none", "", "n/a", "na", "-"}
+
+
+def _is_null_like(value: object) -> bool:
+    """True si el valor es un string que representa 'null' o similar."""
+    if value is None:
+        return True
+    if isinstance(value, str) and value.strip().lower() in _NULL_LIKE:
+        return True
+    return False
 
 
 def _extract_json_block(raw: str) -> dict:
-    """Extrae el primer bloque JSON válido del output del LLM.
-
-    Robusto ante texto adicional, fences de markdown, o prefijos raros.
-    """
-    # Quitar fences de markdown ```json ... ```
+    """Extrae el primer bloque JSON válido del output del LLM."""
     text = raw.strip()
     if text.startswith("```"):
-        # Quitar la primera línea (```json o ```)
         lines = text.splitlines()
         text = "\n".join(lines[1:])
         if text.rstrip().endswith("```"):
             text = text.rstrip()[:-3]
 
-    # Intentar parsear directo
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
 
-    # Buscar el primer objeto {...} balanceado
     depth = 0
     start = None
     for i, ch in enumerate(text):
@@ -226,22 +204,15 @@ def _verify_samples_in_text(
     manifest: CaseManifest,
     text: str,
 ) -> tuple[list[str], list[str]]:
-    """Verifica que los samples del manifiesto aparecen en el texto.
-
-    Nivel 2 de validación: detecta si el LLM inventó samples.
-
-    Returns:
-        (verified, unverified): listas de samples.
-    """
+    """Verifica que los samples del manifiesto aparecen en el texto."""
     text_lower = text.lower()
     verified: list[str] = []
     unverified: list[str] = []
 
-    # Aceptamos "father" y "padre" como equivalentes, etc.
     SYNONYMS = {
         "father": ["father", "padre", "papá", "the father", "el padre"],
         "mother": ["mother", "madre", "mamá", "the mother", "la madre"],
-        "proband": ["proband", "proband", "paciente", "patient", "hijo", "hija", "child"],
+        "proband": ["proband", "paciente", "patient", "hijo", "hija", "child"],
         "son": ["son", "hijo"],
         "daughter": ["daughter", "hija"],
         "sibling": ["sibling", "hermano", "hermana", "brother", "sister"],
@@ -249,19 +220,127 @@ def _verify_samples_in_text(
 
     for ind in manifest.pedigree:
         sample = ind.sample
-        # Si el sample es literal en el texto, verificado
         if sample.lower() in text_lower:
             verified.append(sample)
             continue
-        # Si el sample coincide con un sinónimo conocido, verificado
         synonyms = SYNONYMS.get(sample.lower(), [])
         if any(syn in text_lower for syn in synonyms):
             verified.append(sample)
             continue
-        # Si no, no verificado
         unverified.append(sample)
 
     return verified, unverified
+
+
+def _sanitize_pedigree(
+    manifest: CaseManifest,
+) -> tuple[CaseManifest, list[str]]:
+    """Limpia errores comunes del LLM en el pedigrí.
+
+    1. Elimina samples con nombre "null", "none", "" o similar.
+    2. Convierte referencias "father": "null" (string) a None.
+    3. Elimina autorreferencias: un sample no puede ser su propio
+       padre/madre.
+    """
+    warnings: list[str] = []
+    cleaned: list[IndividualSpec] = []
+
+    for ind in manifest.pedigree:
+        # 1. Sample inválido
+        if _is_null_like(ind.sample):
+            warnings.append(
+                f"Eliminado sample con nombre inválido: {ind.sample!r}."
+            )
+            continue
+
+        # 2. Referencias father/mother con "null" string
+        father = None if _is_null_like(ind.father) else ind.father
+        mother = None if _is_null_like(ind.mother) else ind.mother
+
+        # 3. Autorreferencias
+        if father == ind.sample:
+            warnings.append(
+                f"Sample '{ind.sample}' se referenciaba a sí mismo como "
+                f"padre; limpiado a null."
+            )
+            father = None
+        if mother == ind.sample:
+            warnings.append(
+                f"Sample '{ind.sample}' se referenciaba a sí mismo como "
+                f"madre; limpiado a null."
+            )
+            mother = None
+
+        cleaned.append(
+            IndividualSpec(
+                sample=ind.sample,
+                sex=ind.sex,
+                affected=ind.affected,
+                father=father,
+                mother=mother,
+            )
+        )
+
+    manifest.pedigree = cleaned
+    return manifest, warnings
+
+
+def _clean_affected_samples(
+    manifest: CaseManifest,
+) -> tuple[CaseManifest, list[str]]:
+    """Recalcula `affected_samples` desde el pedigree.
+
+    Fuente única de verdad: un sample está afectado si y solo si
+    tiene `affected=True` en el pedigree. Esto elimina cualquier
+    discrepancia introducida por el LLM.
+    """
+    warnings: list[str] = []
+    original = list(manifest.affected_samples)
+
+    derived = [ind.sample for ind in manifest.pedigree if ind.affected]
+
+    # Detectar discrepancias para el warning
+    if set(original) != set(derived):
+        warnings.append(
+            f"affected_samples recalculado desde pedigree: "
+            f"LLM dijo {original}, pedigree dice {derived}."
+        )
+
+    manifest.affected_samples = derived
+    return manifest, warnings
+
+
+def _enforce_pedigree_consistency(
+    manifest: CaseManifest,
+) -> tuple[CaseManifest, list[str]]:
+    """Añade samples referenciados como father/mother que no están
+    definidos en el pedigree."""
+    warnings: list[str] = []
+    defined = {ind.sample for ind in manifest.pedigree}
+
+    to_add: set[str] = set()
+    for ind in manifest.pedigree:
+        if ind.father and ind.father not in defined:
+            to_add.add(ind.father)
+        if ind.mother and ind.mother not in defined:
+            to_add.add(ind.mother)
+
+    for sample in sorted(to_add):
+        manifest.pedigree.append(
+            IndividualSpec(
+                sample=sample,
+                sex="U",
+                affected=False,
+                father=None,
+                mother=None,
+            )
+        )
+        warnings.append(
+            f"Sample '{sample}' referenciado como padre/madre pero no "
+            f"definido en el pedigrí; añadido con sex=U, affected=false."
+        )
+
+    return manifest, warnings
 
 
 def _validate_and_clean(
@@ -270,17 +349,17 @@ def _validate_and_clean(
 ) -> tuple[CaseManifest, list[str]]:
     """Valida y limpia un dict como CaseManifest.
 
-    Nivel 1: Pydantic valida el esquema.
-    Nivel 2: verifica samples contra el texto.
-
-    Returns:
-        (manifest, warnings)
+    Pipeline:
+      1. Pydantic valida el esquema (Nivel 1).
+      2. _sanitize_pedigree: limpia "null", autorreferencias, etc.
+      3. _clean_affected_samples: recalcula desde pedigree.
+      4. _enforce_pedigree_consistency: completa referencias.
+      5. _verify_samples_in_text: Nivel 2 contra el texto.
     """
     warnings: list[str] = []
 
     # Asegurar case_id
     if not data.get("case_id"):
-        # Derivar uno simple
         import uuid
         data["case_id"] = f"nl_case_{uuid.uuid4().hex[:8]}"
         warnings.append(f"case_id derivado automáticamente: {data['case_id']}")
@@ -289,17 +368,26 @@ def _validate_and_clean(
     if not data.get("extractor"):
         data["extractor"] = "llm"
 
-    # Limpiar campos que pueden venir con valores inesperados
-    # (el LLM a veces pone null en lugar de lista vacía)
+    # Limpiar campos null
     for k in ("pedigree", "hpo_terms", "phenotype_text",
               "candidate_rois", "candidate_genes", "affected_samples"):
         if data.get(k) is None:
             data[k] = [] if k != "hpo_terms" and k != "phenotype_text" else {}
 
-    # Pydantic valida
+    # Nivel 1: Pydantic
     manifest = CaseManifest.model_validate(data)
 
-    # Nivel 2: verificar samples contra el texto
+    # Post-procesado en orden
+    manifest, w1 = _sanitize_pedigree(manifest)
+    warnings.extend(w1)
+
+    manifest, w2 = _clean_affected_samples(manifest)
+    warnings.extend(w2)
+
+    manifest, w3 = _enforce_pedigree_consistency(manifest)
+    warnings.extend(w3)
+
+    # Nivel 2: verificación contra el texto
     verified, unverified = _verify_samples_in_text(manifest, text)
     if unverified:
         warnings.append(
@@ -314,12 +402,7 @@ def nl_to_case_manifest(
     runtime: "ToolRuntime",
     inp: "NLToCaseManifestInput",
 ) -> "NLToCaseManifestOutput":
-    """Extrae un CaseManifest de un relato clínico con un LLM local.
-
-    No usa ToolRuntime para ejecutar binarios; lo recibe por consistencia
-    con la firma de dispatch() pero no lo utiliza. La extracción la hace
-    el LLM configurado (por defecto qwen2.5:7b en Ollama local).
-    """
+    """Extrae un CaseManifest de un relato clínico con un LLM local."""
     from ..agent.config import load_config
     from ..agent.llm_factory import build_llm_client
     from ..agent.prompts import (
@@ -332,32 +415,22 @@ def nl_to_case_manifest(
     if not text:
         raise ValueError("El relato clínico está vacío")
 
-    # Cliente LLM
     cfg = load_config()
     client = build_llm_client(cfg.llm)
 
-    # Prompt
     user = render_extract_manifest_user(text, case_id=inp.case_id)
-
-    # Llamada al LLM
     raw = client.complete(EXTRACT_MANIFEST_SYSTEM_PROMPT, user)
 
-    # Parsear JSON
     data = _extract_json_block(raw)
-
-    # Validar y limpiar
     manifest, warnings = _validate_and_clean(data, text)
 
-    # Escribir a disco
     output_dir = Path(inp.output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_dir / f"{manifest.case_id}.manifest.json"
     save_case_manifest(manifest, manifest_path)
 
-    # Verificar samples
     verified, unverified = _verify_samples_in_text(manifest, text)
 
-    # Mensaje
     n_samples = len(manifest.pedigree)
     n_hpo = sum(len(v) for v in manifest.hpo_terms.values())
     n_rois = len(manifest.candidate_rois)

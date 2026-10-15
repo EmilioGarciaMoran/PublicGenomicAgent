@@ -261,7 +261,7 @@ class OllamaClient(HttpLLMClient):
             "options": {
                 "temperature": self.temperature,
                 "num_ctx": self.num_ctx,
-                "num_predict": 1024,
+                "num_predict": 1536,
             },
         }
 
