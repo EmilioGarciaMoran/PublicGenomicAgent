@@ -259,9 +259,14 @@ HARD RULES (non-negotiable):
   5. The `case_id` field is derived from the text if not given. Use a
      short descriptive slug (e.g. "family_epilepsy_2026"). No spaces.
 
-  6. HPO terms are expressed as IDs "HP:0000000". If you only have the
-     symptom name, DO NOT invent the ID: leave the list empty and put
-     the symptom text in `phenotype_text`.
+  6. HPO terms. By default, `hpo_terms` MUST BE EMPTY ({}). DO NOT
+     INVENT HPO IDs UNDER ANY CIRCUMSTANCES. Only include an HPO ID
+     if the clinical narrative mentions it EXPLICITLY in the format
+     "HP:0000000". Examples:
+       - Text: "the patient has HP:0012469" -> {"proband": ["HP:0012469"]}
+       - Text: "the patient has epilepsy" -> {} (empty)
+     Invented HPO IDs are worse than having none. If in doubt, leave
+     `hpo_terms` empty and put the symptom in `phenotype_text`.
 
   7. PEDIGREE CONSISTENCY. If a sample appears referenced as `father`
      or `mother` of another sample, THAT SAMPLE MUST ALSO BE in the
@@ -291,6 +296,13 @@ HARD RULES (non-negotiable):
       use the JSON null (without quotes) or an empty list. Similarly,
       a sample cannot be its own father or mother: if you would produce
       `"father": "father"` for the sample "father", use null instead.
+
+  11. NEVER GENERATE LONG LISTS. If `hpo_terms`, `candidate_rois`, or
+      `candidate_genes` would have more than 5 elements, that is a
+      sign you are inventing. Leave the list empty or keep only the
+      elements STRICTLY mentioned in the text. The output JSON must
+      fit in less than 1000 tokens. If your response approaches that
+      limit, you have hallucinated.
 
 OUTPUT FORMAT (JSON):
 

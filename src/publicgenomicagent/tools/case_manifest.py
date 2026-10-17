@@ -341,6 +341,86 @@ def _enforce_pedigree_consistency(
         )
 
     return manifest, warnings
+def _normalize_individual_fields(
+    data: dict,
+) -> tuple[dict, list[str]]:
+    """Normaliza campos problemáticos en el pedigrí antes de Pydantic.
+
+    El LLM a veces emite `"affected": null` en lugar de `true`/`false`.
+    Pydantic lo rechaza. Convertimos:
+      - affected: null -> false
+      - sex: null o inválido -> "U"
+    """
+    warnings: list[str] = []
+
+    pedigree = data.get("pedigree", [])
+    if not isinstance(pedigree, list):
+        return data, warnings
+
+    for i, ind in enumerate(pedigree):
+        if not isinstance(ind, dict):
+            continue
+
+        # affected: null o no-boolean -> false
+        if ind.get("affected") is None:
+            ind["affected"] = False
+            warnings.append(
+                f"pedigree[{i}] ({ind.get('sample', '?')}): "
+                f"affected=null -> false."
+            )
+        elif not isinstance(ind.get("affected"), bool):
+            ind["affected"] = bool(ind.get("affected"))
+            warnings.append(
+                f"pedigree[{i}] ({ind.get('sample', '?')}): "
+                f"affected no booleano -> {ind['affected']}."
+            )
+
+        # sex: default "U"
+        sex = ind.get("sex")
+        if sex not in ("M", "F", "U"):
+            ind["sex"] = "U"
+            if sex not in (None, "U"):
+                warnings.append(
+                    f"pedigree[{i}] ({ind.get('sample', '?')}): "
+                    f"sex inválido {sex!r} -> 'U'."
+                )
+
+    return data, warnings
+
+def _sanitize_lists(
+    data: dict,
+) -> tuple[dict, list[str]]:
+    """Corta listas sospechosamente largas antes de Pydantic.
+
+    El LLM a veces alucina listas gigantes de HPOs, genes o ROIs
+    inventados. Si una lista supera MAX_LIST_LEN, la vaciamos.
+    """
+    MAX_LIST_LEN = 10
+    warnings: list[str] = []
+
+    # hpo_terms: dict sample -> list[HPO]
+    hpo_terms = data.get("hpo_terms")
+    if isinstance(hpo_terms, dict):
+        for sample, terms in list(hpo_terms.items()):
+            if isinstance(terms, list) and len(terms) > MAX_LIST_LEN:
+                hpo_terms[sample] = []
+                warnings.append(
+                    f"hpo_terms['{sample}'] tenía {len(terms)} términos "
+                    f"(>{MAX_LIST_LEN}); probablemente alucinado, vaciado."
+                )
+
+    # candidate_rois y candidate_genes
+    for key in ("candidate_rois", "candidate_genes"):
+        val = data.get(key)
+        if isinstance(val, list) and len(val) > MAX_LIST_LEN:
+            data[key] = []
+            warnings.append(
+                f"{key} tenía {len(val)} elementos (>{MAX_LIST_LEN}); "
+                f"probablemente alucinado, vaciado."
+            )
+
+    return data, warnings
+
 
 
 def _validate_and_clean(
@@ -373,9 +453,18 @@ def _validate_and_clean(
               "candidate_rois", "candidate_genes", "affected_samples"):
         if data.get(k) is None:
             data[k] = [] if k != "hpo_terms" and k != "phenotype_text" else {}
+    # Normalizar campos problemáticos del pedigrí antes de Pydantic
+        # Normalizar campos problemáticos del pedigrí antes de Pydantic
+    data, wn = _normalize_individual_fields(data)
+    warnings.extend(wn)
+
+    # Cortar listas sospechosamente largas (alucinaciones de HPOs, genes)
+    data, wl = _sanitize_lists(data)
+    warnings.extend(wl)
 
     # Nivel 1: Pydantic
     manifest = CaseManifest.model_validate(data)
+
 
     # Post-procesado en orden
     manifest, w1 = _sanitize_pedigree(manifest)
@@ -442,7 +531,10 @@ def nl_to_case_manifest(
     )
     if warnings:
         message += f" ({len(warnings)} warning(s))"
-
+    # Sobreescribir el extractor con el modelo real (el LLM a veces inventa)
+    real_extractor = f"llm:{cfg.llm.model}"
+    if manifest.extractor != real_extractor:
+        manifest.extractor = real_extractor
     return NLToCaseManifestOutput(
         ok=True,
         tool="nl_to_case_manifest",
