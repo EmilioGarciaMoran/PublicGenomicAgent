@@ -221,3 +221,104 @@ def test_verify_flags_non_monotonic_timestamps():
     )
     issues = verify_session(_session(st))
     assert any("timestamp" in i for i in issues)
+
+
+# ---------------------------------------------------------------------------
+# Audit v2: hashes de integridad
+# ---------------------------------------------------------------------------
+
+def test_input_hash_matches_canonical_json():
+    """input_hash = sha256 del JSON canónico del input."""
+    from publicgenomicagent.agent.state import _hash_json
+
+    st = _empty_state()
+    inp = {"bam_path": "/x.bam", "level": "structural"}
+    out = {"ok": True, "message": "QC OK"}
+    st.record(tool_name="qc_bam", inp=inp, out=out, duration_ms=10)
+
+    rec = st.tool_calls[0]
+    assert rec.input_hash == _hash_json(inp)
+    assert rec.output_hash == _hash_json(out)
+
+
+def test_hash_absent_for_old_sessions():
+    """Sesiones sin hashes no fallan en verify_session."""
+    st = _empty_state()
+    st.tool_calls.append(
+        ToolCallRecord(
+            tool_name="qc_bam",
+            input={"bam_path": "/x.bam", "level": "structural"},
+            output={"ok": True, "message": "QC OK"},
+            ok=True,
+            duration_ms=10,
+            input_hash=None,
+            output_hash=None,
+        )
+    )
+    issues = verify_session(_session(st))
+    # Sin hashes, no debe quejarse de hashes
+    assert not any("hash" in i.lower() for i in issues)
+
+
+def test_hash_detects_manipulated_input():
+    """Si alguien modifica el input, el hash deja de coincidir."""
+    st = _empty_state()
+    st.record(
+        tool_name="qc_bam",
+        inp={"bam_path": "/x.bam", "level": "structural"},
+        out={"ok": True, "message": "QC OK"},
+        duration_ms=10,
+    )
+    # Manipular el input después de grabar
+    st.tool_calls[0].input["bam_path"] = "/different.bam"
+
+    issues = verify_session(_session(st))
+    assert any("input_hash no coincide" in i for i in issues)
+
+
+def test_hash_detects_manipulated_output():
+    """Si alguien modifica el output, el hash deja de coincidir."""
+    st = _empty_state()
+    st.record(
+        tool_name="qc_bam",
+        inp={"bam_path": "/x.bam", "level": "structural"},
+        out={"ok": True, "message": "QC OK"},
+        duration_ms=10,
+    )
+    # Manipular el output después de grabar
+    st.tool_calls[0].output["message"] = "manipulated"
+
+    issues = verify_session(_session(st))
+    assert any("output_hash no coincide" in i for i in issues)
+
+
+def test_hash_ok_when_unchanged():
+    """Una sesión sin manipulación no produce issues de hash."""
+    st = _empty_state()
+    st.record(
+        tool_name="qc_bam",
+        inp={"bam_path": "/x.bam", "level": "structural"},
+        out={"ok": True, "message": "QC OK"},
+        duration_ms=10,
+    )
+    issues = verify_session(_session(st))
+    assert not any("hash" in i.lower() for i in issues)
+
+
+def test_hash_stable_across_key_order():
+    """El hash no depende del orden de claves (JSON canónico)."""
+    from publicgenomicagent.agent.state import _hash_json
+
+    a = {"a": 1, "b": 2, "c": 3}
+    b = {"c": 3, "a": 1, "b": 2}
+    assert _hash_json(a) == _hash_json(b)
+
+
+def test_hash_handles_path_values():
+    """El hash funciona con valores que se serializan a string."""
+    from pathlib import Path
+    from publicgenomicagent.agent.state import _hash_json
+
+    a = {"path": str(Path("/tmp/x.bam"))}
+    b = {"path": "/tmp/x.bam"}
+    assert _hash_json(a) == _hash_json(b)

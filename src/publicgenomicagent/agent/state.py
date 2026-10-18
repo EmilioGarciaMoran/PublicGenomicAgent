@@ -9,9 +9,14 @@ tool invocada.
 `call_tool(name, **kwargs)` como única puerta de entrada para ejecutar
 tools. Esto garantiza que toda llamada quede registrada con su input
 validado, su output serializado, su duración y, si falla, el error.
+
+Cada `ToolCallRecord` incluye además hashes SHA-256 del input y del
+output (JSON canónico) para permitir verificación de integridad
+posterior con `pga audit --verify`.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from datetime import datetime, timezone
@@ -25,6 +30,41 @@ from ..tools.base import CaseManifest, ToolOutput
 from ..tools.registry import dispatch, get_tool
 
 
+# ---------------------------------------------------------------------------
+# Hashing helpers
+# ---------------------------------------------------------------------------
+
+def _json_canonical(obj: Any) -> str:
+    """Serialización canónica de un objeto para hashing.
+
+    - sort_keys: el orden de claves no afecta al hash.
+    - separators compactos: elimina espacios irrelevantes.
+    - ensure_ascii=False: UTF-8 real, no escapes.
+    """
+    return json.dumps(
+        obj,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+
+
+def _sha256(s: str) -> str:
+    """SHA-256 hex de un string UTF-8."""
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()
+
+
+def _hash_json(obj: Any) -> str | None:
+    """Hash SHA-256 del JSON canónico de un objeto. None si obj es None."""
+    if obj is None:
+        return None
+    return _sha256(_json_canonical(obj))
+
+
+# ---------------------------------------------------------------------------
+# Modelos
+# ---------------------------------------------------------------------------
+
 class ToolCallRecord(BaseModel):
     """Traza auditable de una llamada a una tool."""
 
@@ -35,6 +75,10 @@ class ToolCallRecord(BaseModel):
     duration_ms: int = 0
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     error: str | None = None
+
+    # Audit v2: hashes para verificación de integridad
+    input_hash: str | None = None
+    output_hash: str | None = None
 
 
 class AgentState(BaseModel):
@@ -47,12 +91,12 @@ class AgentState(BaseModel):
     case: CaseManifest
 
     # Rutas conocidas de la sesión, indexadas por nombre lógico.
-    bams: dict[str, Path] = Field(default_factory=dict)     # sample -> BAM
-    vcfs: dict[str, Path] = Field(default_factory=dict)     # sample/label -> VCF
-    fastqs: dict[str, Path] = Field(default_factory=dict)   # sample -> FASTQ
-    references: dict[str, Path] = Field(default_factory=dict)  # label -> FASTA
+    bams: dict[str, Path] = Field(default_factory=dict)
+    vcfs: dict[str, Path] = Field(default_factory=dict)
+    fastqs: dict[str, Path] = Field(default_factory=dict)
+    references: dict[str, Path] = Field(default_factory=dict)
 
-    # Artefactos intermedios generados por tools (grafos vg, packs, índices).
+    # Artefactos intermedios generados por tools.
     artifacts: dict[str, Path] = Field(default_factory=dict)
 
     # Trazas y resultados.
@@ -63,7 +107,6 @@ class AgentState(BaseModel):
     # --- API de consulta -------------------------------------------------
 
     def latest(self, tool_name: str) -> dict[str, Any] | None:
-        """Último output registrado para una tool, o None."""
         return self.outputs.get(tool_name)
 
     def calls_of(self, tool_name: str) -> list[ToolCallRecord]:
@@ -94,6 +137,8 @@ class AgentState(BaseModel):
             ok=ok,
             duration_ms=duration_ms,
             error=error,
+            input_hash=_hash_json(inp),
+            output_hash=_hash_json(out) if ok else None,
         )
         self.tool_calls.append(rec)
         if ok and out is not None:
@@ -117,36 +162,20 @@ class AgentState(BaseModel):
 
 
 class SessionContext:
-    """Contexto vivo de una sesión: estado + runtime.
-
-    Uso típico desde el loop agéntico:
-
-        ctx = SessionContext(state=state, runtime=runtime)
-        out = ctx.call_tool("fetch_roi",
-                            bam_path=..., region=..., output_bam=...)
-        # el estado queda con la traza actualizada
-    """
+    """Contexto vivo de una sesión: estado + runtime."""
 
     def __init__(self, state: AgentState, runtime: ToolRuntime | None = None):
         self.state = state
         self.runtime = runtime
 
     def call_tool(self, tool_name: str, **kwargs: Any) -> ToolOutput:
-        """Ejecuta una tool por nombre, registra la traza y devuelve el output.
-
-        - Valida el input contra el modelo Pydantic de la tool.
-        - Si la tool necesita runtime y no lo hay, lanza ValueError.
-        - Cualquier excepción de la tool se registra como error y se re-lanza.
-        """
+        """Ejecuta una tool por nombre, registra la traza y devuelve el output."""
         spec = get_tool(tool_name)
 
-        # Validación previa para poder registrar el input ya normalizado
-        # (Path -> str, Enums -> valor, etc.) aunque la ejecución falle.
         try:
             validated = dispatch(tool_name, validate_only=True, **kwargs)
             inp_json = validated.model_dump(mode="json")
         except Exception as e:  # noqa: BLE001
-            # Input inválido: lo registramos con error y re-lanzamos.
             self.state.record(
                 tool_name=tool_name,
                 inp={k: _jsonable(v) for k, v in kwargs.items()},
@@ -179,10 +208,7 @@ class SessionContext:
             duration_ms=elapsed,
         )
 
-        # Efectos colaterales útiles: si la tool produce ficheros
-        # convencionales, los indexamos en el estado.
         _register_side_effects(self.state, tool_name, out)
-
         return out
 
 
@@ -190,72 +216,30 @@ def _jsonable(value: Any) -> Any:
     """Convierte Path, Enum, etc. a algo serializable a JSON."""
     if isinstance(value, Path):
         return str(value)
-    if hasattr(value, "value"):  # Enum
+    if hasattr(value, "value"):
         return value.value
     return value
 
 
 def _logical_label(path: str | Path) -> str:
-    """Extrae una etiqueta lógica legible de un path.
-
-    Ejemplos:
-      /r/roi/father.chr1_1000_1200.vcf.gz  -> father
-      /r/roi/proband.chr1_1000_1200.bam    -> proband
-      /r/graph.vg                          -> graph
-      /r/pack.pack                         -> pack
-
-    Estrategia:
-      1. Tomar el basename.
-      2. Quitar la extensión compuesta (.vcf.gz, .bam.bai, .bam, .vg, ...).
-      3. Cortar por "." y devolver el primer trozo.
-
-    Nota: el corte por "." asume que el primer componente del nombre
-    es el identificador lógico (father, proband, graph, pack). Si en
-    el futuro un nombre de fichero legítimamente empieza por puntos
-    (p. ej. "sample.s1.ROI.bam" donde sample.s1 es la etiqueta),
-    habría que ajustar esta función. Hoy por hoy el prefijo es
-    siempre el sample ID o el tipo de artefacto.
-    """
+    """Extrae una etiqueta lógica legible de un path."""
     name = Path(str(path)).name
-    # Quitar extensiones compuestas y simples.
     for suffix in (
-        ".vcf.gz.tbi",
-        ".vcf.gz",
-        ".bam.bai",
-        ".cram.crai",
-        ".bam",
-        ".cram",
-        ".vcf",
-        ".bcf",
-        ".vg",
-        ".xg",
-        ".pack",
-        ".gam",
-        ".fa",
-        ".fai",
+        ".vcf.gz.tbi", ".vcf.gz", ".bam.bai", ".cram.crai",
+        ".bam", ".cram", ".vcf", ".bcf", ".vg", ".xg", ".pack",
+        ".gam", ".fa", ".fai",
     ):
         if name.endswith(suffix):
             name = name[: -len(suffix)]
             break
     else:
-        # Sin extensión conocida: quitar solo el último componente
         if "." in name:
             name = name.rsplit(".", 1)[0]
-    # Primer trozo del nombre separado por "."
     return name.split(".")[0]
 
 
 def _register_side_effects(state: AgentState, tool_name: str, out: ToolOutput) -> None:
-    """Indexa rutas producidas por tools en el estado de la sesión.
-
-    Las CLAVES son etiquetas lógicas (p. ej. "called:father"), no rutas
-    absolutas. Esto es deliberado: las claves se envían al LLM en
-    `render_state`, y no deben filtrar directorios clínicos.
-
-    Los VALORES sí son Path absolutos, porque el propio agente los
-    necesita para ejecutar tools. La sanitización de valores ocurre
-    en `render_state` (a basename) salvo que include_paths=True.
-    """
+    """Indexa rutas producidas por tools en el estado de la sesión."""
     d = out.model_dump(mode="json") if hasattr(out, "model_dump") else {}
 
     if tool_name == "fetch_roi":
@@ -275,16 +259,12 @@ def _register_side_effects(state: AgentState, tool_name: str, out: ToolOutput) -
         if d.get("pack"):
             state.artifacts["pack"] = Path(d["pack"])
     elif tool_name == "joint_call":
-        # El VCF conjunto se indexa con la clave "trio", que es la
-        # que `_rule_mendelian` del planner busca. Es el único VCF
-        # que contiene las 3 muestras en columnas separadas.
         if "output_vcf" in d:
             state.vcfs["trio"] = Path(d["output_vcf"])
     elif tool_name == "prioritize_variants":
         if "output_vcf" in d:
             state.vcfs["prioritized"] = Path(d["output_vcf"])
     elif tool_name == "annotate_variants":
-        # El VCF anotado se indexa con la clave "annotated".
         if "output_vcf" in d:
             state.vcfs["annotated"] = Path(d["output_vcf"])
     elif tool_name == "call_from_graph":
