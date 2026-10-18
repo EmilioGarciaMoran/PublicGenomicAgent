@@ -1,6 +1,6 @@
 # PublicGenomicAgent
 
-**A clinical-grade, privacy-first conversational agent for genomic analysis.**
+**A clinical-grade, privacy-first auditable genomic workflow for clinical analysis.**
 
 Given a clinical phenotype, a family structure, and pre-aligned BAMs,
 PublicGenomicAgent analyzes only the relevant regions of interest (ROIs)
@@ -8,7 +8,8 @@ and returns a prioritized variant report — with Mendelian statistics,
 local pangenomization, and a fully auditable execution trace.
 
 Designed for modest hardware: laptops, external drives, no cluster.
-Air-gapped capable.
+Air-gapped by default: local LLM, no external calls. Optional external
+providers under explicit consent.
 
 ---
 
@@ -24,6 +25,21 @@ This system produces *decisions*.
   traceability.
 
 The VCF is the intermediate language. The decision is the product.
+
+## Design principle: manifest-first
+
+No analysis runs without a complete and correct `CaseManifest`. The
+LLM proposes, the system validates against the source text, and the
+user confirms before the pipeline executes. There are no shortcuts:
+either the manifest is ready, or the system asks for what is missing.
+
+The LLM is an interpreter, not a decision engine. It translates the
+clinician's narrative into structured input. The workflow itself is
+deterministic, auditable, and reproducible.
+
+See [`docs/pitch.md`](docs/pitch.md) for details.
+
+---
 
 ## Approach: clinical, not genomic
 
@@ -116,29 +132,32 @@ Optional phenotype layer (requires GPU ≥ 20 GB or a dedicated server):
 ### Run a trio analysis end-to-end
 
 ```bash
-# 1. Generate a synthetic trio with a recessive variant (chr1:1100 A>G)
-python3 scripts/make_demo_trio.py
+# 1. Generate a synthetic trio with a recessive variant (chr2:50001 A>C)
+python3 scripts/make_demo_case.py
 
-# 2. Run the full pipeline (11 automatic steps)
-pga run-trio \
-    --father results/demo_trio/father.bam \
-    --mother results/demo_trio/mother.bam \
-    --proband results/demo_trio/proband.bam \
-    --reference results/demo_trio/ref.fa \
-    --region chr1:1000-1200 \
-    --case-id DEMO_TRIO --label DEMO1
+# 2. Run the pipeline (12 automatic tool calls)
+pga chat --case cases/demo_trio/manifest.json
+# > analiza el caso
+# > exit
 ```
 
-Output: `results/DEMO_TRIO.session.json` with 11 traced tool calls,
+Output: `sessions/<timestamp>/session.json` with 12 traced tool calls,
 including `joint_call` and `mendelian_filter`. The variant is classified
 as `auto_rec_hom` (autosomal recessive homozygous) with genotypes
-`father=0/1`, `mother=0/1`, `proband=1/1`.
+`father=0/1`, `mother=0/1`, `proband=1/1`. `prioritize_variants`
+returns 1 scored variant.
+
+Verify integrity with hashes:
+
+```bash
+pga audit sessions/$(ls -t sessions/ | head -n 1)/session.json --verify
+```
 
 For a longer walkthrough, see [`docs/quickstart.md`](docs/quickstart.md).
 
 ## Tools
 
-13 tools registered in `TOOL_REGISTRY`, all with Pydantic input/output
+17 tools registered in `TOOL_REGISTRY`, all with Pydantic input/output
 and deterministic execution:
 
 | Tool | Description | Runtime |
@@ -156,6 +175,10 @@ and deterministic execution:
 | `call_from_graph` | Call variants from graph + pack (vg call) | yes |
 | `extract_hpo` | Extract HPO terms from clinical text (RDMA) | no |
 | `phenotype_ranking` | LIRICAL-based candidate ranking from HPO ± VCF | no |
+| `annotate_variants` | Copy CLNSIG/CLNDN columns from a ClinVar VCF | yes |
+| `prioritize_variants` | Score and rank variants by clinical rules | no |
+| `detect_homozygous_regions` | ROH restricted to VCF (bcftools roh) | yes |
+| `nl_to_case_manifest` | Extract CaseManifest from clinical narrative (LLM) | yes |
 
 List them from the CLI:
 
@@ -179,12 +202,35 @@ pga env verify     # check binaries and versions
 
 See [`docs/virtualization.md`](docs/virtualization.md).
 
+## Hardware recommendations
+
+PublicGenomicAgent scales the LLM to the available hardware. The
+workflow itself (tools, manifest, audit) has minimal requirements.
+The LLM is optional and configurable.
+
+| Hardware | LLM | Notes |
+|---|---|---|
+| 15 GB RAM (laptop) | `qwen2.5:3b` | ~1-3 min per CaseManifest extraction. Use `num_ctx: 8192`. |
+| 15 GB RAM (laptop) | `qwen2.5:7b` | Not recommended: swap makes it very slow. |
+| 32+ GB RAM or GPU | `qwen2.5:7b` or larger | Comfortable for interactive use. |
+| Server with GPU | 14B+ models | Full agentic capability (multi-step planning). |
+| Air-gapped | `qwen2.5:3b` / `7b` local | No external calls. Default mode. |
+| With external API | `openai`, `anthropic` | Optional, explicit consent, recorded in session.json. |
+
+The workflow without LLM (using `RuleBasedPlanner`) runs on any
+machine with Python 3.11+ and the `pga-core` environment.
+
 ## Tests
 
 ```bash
-pytest tests/unit/         # 65 unit tests, no environment needed
-pytest tests/integration/  # 30 integration tests, requires micromamba
+pytest tests/unit/         # 170 unit tests, no environment needed
+pytest tests/integration/  # 33 integration tests, requires micromamba
+pytest -q                  # 203 tests total
 ```
+
+The CI pipeline runs on every push: unit tests in a matrix of Python
+3.11 and 3.12, plus a blocking end-to-end smoke test with micromamba
+that generates the demo case and runs the full pipeline.
 
 The integration test `tests/integration/test_demo_trio.py` runs the
 full pipeline on a synthetic recessive trio and verifies the exact
@@ -310,12 +356,26 @@ Reproducible demos:
 
 ## Status
 
-**Active development. 13 tools, 5 isolated environments, 95 tests passing.**
+**Active development. 17 tools, 5 isolated environments, 203 tests passing.**
 
 - Genomic layer (no GPU): complete and tested end-to-end.
-- LLM orchestration (Ollama local): functional, with deterministic fallback.
+- NL → CaseManifest extraction: functional with local LLM
+  (`qwen2.5:3b` or `7b`), with strict post-processing.
+- ROH restricted to panel: `detect_homozygous_regions` (bcftools roh).
+- Audit v2: SHA-256 hashes on every tool call; `pga audit --verify`
+  detects manipulation of `session.json`.
+- CI: unit matrix (3.11/3.12) + blocking end-to-end smoke test.
+- GIAB HG002 real case processed (1765 variants in chr1:1-2 Mb).
 - Phenotype layer (HPO extraction with RDMA): requires GPU ≥ 20 GB.
   See [`docs/phenotype_layer.md`](docs/phenotype_layer.md) §14.
+
+## Contact
+
+- **Author**: Emilio García Morán
+- **ORCID**: https://orcid.org/0000-0002-2487-6686
+- **Repository**: https://github.com/EmilioGarciaMoran/PublicGenomicAgent
+- **Pitch**: [`docs/pitch.md`](docs/pitch.md)
+- **Backlog**: [`docs/backlog.md`](docs/backlog.md)
 
 ## License
 
