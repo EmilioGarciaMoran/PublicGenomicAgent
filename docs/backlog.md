@@ -310,3 +310,58 @@ Nota sobre hardware:
 - `qwen2.5:3b` sí cabe, pero tarda ~2 min por manifest en CPU.
 - Para el pitch: el pipeline escala el modelo según los recursos
   disponibles (3b en portátil, 7b+ en servidor con GPU)."""
+
+## [Pendiente] Pulir bloque NL → CaseManifest
+
+El pipeline `pga case parse` funciona end-to-end con qwen2.5:3b sobre
+relatos en inglés. Quedan tres tareas de pulido:
+
+1. **Falso positivo en warning de samples**: father/mother aparecen
+   en el texto como "parents" / "padres" pero `_verify_samples_in_text`
+   no los reconoce (SYNONYMS no cubre el plural). Añadir:
+   - `father`: `["parents", "padres", "progenitors"]`
+   - `mother`: `["parents", "padres", "progenitors"]`
+   - `proband`: `["son", "daughter", "child", "male patient", "female patient"]`
+
+2. **Probar con relato español**: solo probamos el inglés en la
+   versión final. El prompt es bilingüe; falta verificar.
+
+3. **Tests unitarios con mock del LLM**: no hay tests específicos
+   para `nl_to_case_manifest` con el LLM mockeado. Hay tests de
+   `_sanitize_lists`, `_validate_and_clean`, etc., pero no del
+   flujo end-to-end. Añadir ~8-10 tests con `MagicMock` del cliente.
+
+4. **Documentar hardware en README**:
+   - Con 15 GB RAM: qwen2.5:3b funciona (~1-2 min/manifest).
+   - Con 15 GB RAM: qwen2.5:7b hace swap, inviable.
+   - Con >32 GB RAM o GPU: qwen2.5:7b va cómodo.
+   - El pipeline escala el modelo según los recursos disponibles.
+
+Coste estimado: ~1 hora.
+
+Prioridad: media. Bloquea parcialmente la calidad del NL, pero no
+el resto del pipeline.
+
+## [Pendiente] Email a Alkuraya
+
+Documento de presentación para Fowzan Alkuraya (KFSHRC) proponiendo
+colaboración en desarrollo conjunto. Munición técnica disponible
+hoy:
+
+- Caso demo con variante recesiva sembrada (padres HET, proband HOM).
+- GIAB HG002 real procesado end-to-end (3 tools, 1765 variantes).
+- `detect_homozygous_regions` (ROH restringido a VCF).
+- `nl_to_case_manifest` (relato clínico → manifest estructurado).
+- `pga audit` para verificación de integridad de sesiones.
+- CI verde con 185 tests + smoke E2E.
+
+Pendiente:
+- Redactar el cuerpo del email (2 páginas).
+- Preparar el apéndice técnico (1-2 páginas).
+- Adjuntos: session.json del caso GIAB, session.json del caso demo,
+  fragmento de `pga audit --verbose`.
+- Opcional: vídeo de 2 min con asciinema del pipeline corriendo.
+
+Coste estimado: 2-3 horas.
+
+Prioridad: alta. Es la visibilidad externa del proyecto.
