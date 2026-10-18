@@ -365,3 +365,90 @@ Pendiente:
 Coste estimado: 2-3 horas.
 
 Prioridad: alta. Es la visibilidad externa del proyecto.
+## [Día 6+] Manifest-first enforcement: no ejecutar sin manifest completo y correcto
+
+**Principio de diseño**: un `CaseManifest` completo y correcto es la
+única puerta de entrada al pipeline. No hay atajos. Si falta algo,
+el sistema lo pide activamente antes de ejecutar cualquier tool.
+
+**Por qué**: hoy el sistema falla a mitad del pipeline si falta un
+campo (`CaseManifest.validate_minimum()` o el `ValueError` de una
+tool). Eso obliga al usuario a conocer la gramática del workflow y
+a reiniciar. Un clínico no debería aprender esa gramática: debería
+describir el caso y el sistema debería pedir lo que falte.
+
+### Flujo objetivo
+
+1. Usuario: `pga chat`
+2. Sistema: "¿Puedes describir el caso?"
+3. Usuario: relato libre (EN/ES)
+4. Sistema (LLM): extrae manifest preliminar.
+5. Sistema (validación): verifica cada campo contra el texto original.
+6. Sistema: "El manifest está incompleto. ¿Qué genes o regiones
+   quieres analizar?"
+7. Usuario: "BRCA1, BRCA2"
+8. Sistema (validación): verifica que "BRCA1" y "BRCA2" aparecen en
+   la conversación.
+9. Sistema: "Voy a analizar BRCA1 y BRCA2 en un trío (proband
+   afectado, padres sanos, no consanguíneos). ¿Correcto? [y/N]"
+10. Usuario: "y"
+11. Sistema: ejecuta el pipeline. Registra todo en session.json.
+
+En cada paso, el sistema no avanza sin validar y sin confirmar.
+
+### Implementación
+
+**Bloque 1 — Validación (medio día)**
+- `src/publicgenomicagent/tools/case_manifest.py`:
+  - `required_fields_for_pipeline(manifest) -> dict[str, list[str]]`
+    devuelve qué campos faltan para cada tool del pipeline por
+    defecto.
+  - `validate_manifest_against_source(manifest, text) -> list[str]`
+    verifica que cada campo del manifest está respaldado por el
+    texto original (samples, genes, consanguinidad, ROIs).
+- Tests unitarios de ambas funciones.
+
+**Bloque 2 — Diálogo (1 día)**
+- `src/publicgenomicagent/ui/chat.py`:
+  - `ensure_manifest_ready(manifest, ui) -> CaseManifest`: si faltan
+    campos, lanza preguntas al usuario y actualiza el manifest.
+  - Extender el REPL para hacer preguntas multi-turno.
+- `src/publicgenomicagent/agent/loop.py`:
+  - Antes de `_run_one`, verificar que el manifest está listo para
+    la tool que se va a ejecutar. Si no, no ejecutar y devolver un
+    evento `needs_user_input`.
+
+**Bloque 3 — Integración y tests (medio día)**
+- Integrar todo en `pga chat` y `pga case parse`.
+- Tests de comportamiento:
+  - Manifest completo → pipeline arranca sin preguntas.
+  - Manifest sin ROIs → pregunta por genes/regiones.
+  - Manifest sin pedigree → pregunta por trío/familia.
+  - LLM propone un gen que no está en el texto → rechazado.
+  - Usuario no confirma → pipeline no arranca.
+
+**Total estimado**: 2-3 días.
+
+### Consecuencias en el pitch
+
+El pitch debe decir:
+
+> "PublicGenomicAgent no ejecuta ningún análisis sin un CaseManifest
+> completo y correcto. Si el usuario no ha proporcionado toda la
+> información, el sistema la pide activamente, valida que cada campo
+> esté respaldado por evidencia del input, y solo ejecuta el pipeline
+> cuando el usuario confirma explícitamente. El LLM propone, el
+> sistema valida, el usuario confirma. No hay atajos."
+
+### Lo que NO hace
+
+- No ejecuta "un poco" y completa después. O hay manifest, o no hay
+  análisis.
+- No acepta campos inventados por el LLM sin evidencia en el texto.
+- No avanza sin confirmación explícita del usuario.
+
+### Prioridad
+
+Alta. Bloquea el uso clínico real. Pero no urgente para el email
+a Alkuraya: se puede mencionar como principio de diseño aunque la
+implementación completa llegue después.

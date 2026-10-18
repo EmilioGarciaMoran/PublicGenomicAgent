@@ -209,15 +209,30 @@ def _verify_samples_in_text(
     verified: list[str] = []
     unverified: list[str] = []
 
-    SYNONYMS = {
-        "father": ["father", "padre", "papá", "the father", "el padre"],
-        "mother": ["mother", "madre", "mamá", "the mother", "la madre"],
-        "proband": ["proband", "paciente", "patient", "hijo", "hija", "child"],
-        "son": ["son", "hijo"],
-        "daughter": ["daughter", "hija"],
-        "sibling": ["sibling", "hermano", "hermana", "brother", "sister"],
-    }
 
+    SYNONYMS = {
+        "father": [
+            "father", "padre", "papá", "the father", "el padre",
+            "parents", "padres", "progenitors", "progenitores",
+        ],
+        "mother": [
+            "mother", "madre", "mamá", "the mother", "la madre",
+            "parents", "padres", "progenitors", "progenitoras",
+        ],
+        "proband": [
+            "proband", "paciente", "patient", "hijo", "hija",
+            "child", "son", "daughter", "male patient", "female patient",
+            "the patient", "el paciente", "la paciente", "affected child",
+        ],
+        "son": ["son", "hijo", "male child"],
+        "daughter": ["daughter", "hija", "female child"],
+        "sibling": [
+            "sibling", "hermano", "hermana", "brother", "sister",
+            "older brother", "older sister",
+        ],
+        "brother": ["brother", "hermano", "older brother"],
+        "sister": ["sister", "hermana", "older sister"],
+    }
     for ind in manifest.pedigree:
         sample = ind.sample
         if sample.lower() in text_lower:
@@ -516,7 +531,17 @@ def nl_to_case_manifest(
     output_dir = Path(inp.output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_dir / f"{manifest.case_id}.manifest.json"
+       # Sobreescribir el extractor con el modelo real (el LLM a veces inventa)
+    real_extractor = f"llm:{cfg.llm.model}"
+    if manifest.extractor != real_extractor:
+        manifest.extractor = real_extractor
+
+    # Escribir a disco
+    output_dir = Path(inp.output_dir).expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = output_dir / f"{manifest.case_id}.manifest.json"
     save_case_manifest(manifest, manifest_path)
+   
 
     verified, unverified = _verify_samples_in_text(manifest, text)
 
