@@ -1017,7 +1017,7 @@ def sandbox_run(
     ),
     planner_kind: str = typer.Option(
         "rule", "--planner", "-p",
-        help="rule | llm",
+        help="rule | llm (híbrido, legacy) | decision (determinista + LLM solo en bifurcaciones)",
     ),
     clinvar: str = typer.Option(
         None, "--clinvar",
