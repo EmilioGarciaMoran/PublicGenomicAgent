@@ -636,7 +636,7 @@ def run_trio(
     max_steps: int = typer.Option(50, "--max-steps"),
     planner_kind: str = typer.Option(
         "rule", "--planner", "-p",
-        help="rule (determinista) | llm (LLM local con fallback)",
+        help="rule (determinista) | llm (híbrido, legacy) | decision (determinista + LLM solo en bifurcaciones)",
     ),
     clinvar: str = typer.Option(
         None, "--clinvar",
@@ -726,9 +726,21 @@ def run_trio(
         )
     elif planner_kind == "rule":
         planner = RuleBasedPlanner()
+    elif planner_kind == "decision":
+        from publicgenomicagent.agent.config import load_config
+        from publicgenomicagent.agent.decision_planner import (
+            DecisionPlanner, build_chooser,
+        )
+
+        cfg = load_config().llm
+        planner = DecisionPlanner(chooser=build_chooser(cfg))
+        console.print(
+            f"[dim]planner=decision (determinista; LLM solo en bifurcaciones) "
+            f"model={cfg.model}[/dim]"
+        )
     else:
         console.print(
-            f"[red]--planner debe ser 'rule' o 'llm', no '{planner_kind}'[/red]"
+            f"[red]--planner debe ser 'rule', 'llm' o 'decision', no '{planner_kind}'[/red]"
         )
         raise typer.Exit(code=2)
 
@@ -1139,8 +1151,14 @@ def sandbox_run(
             rule=RuleBasedPlanner(),
             include_paths=cfg.include_paths,
         )
+    elif planner_kind == "decision":
+        from publicgenomicagent.agent.config import load_config
+        from publicgenomicagent.agent.decision_planner import (
+            DecisionPlanner, build_chooser,
+        )
+        planner = DecisionPlanner(chooser=build_chooser(load_config().llm))
     else:
-        console.print("[red]--planner debe ser rule o llm[/red]")
+        console.print("[red]--planner debe ser rule, llm o decision[/red]")
         raise typer.Exit(code=2)
 
     ctx = SessionContext(state=state, runtime=_runtime())
