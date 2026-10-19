@@ -1,19 +1,20 @@
 """DecisionPlanner: planificación determinista con elección acotada del LLM.
 
 Principio: el código decide QUÉ acciones son válidas (y construye sus
-argumentos); el LLM, como mucho, elige ENTRE acciones ya válidas, y solo
-cuando de verdad hay una bifurcación (pasos opcionales).
+argumentos); el LLM, como mucho, decide si se EJECUTA o se SALTA un paso
+que el usuario ha declarado explícitamente como saltable.
 
   - Sin candidatos            -> stop. El LLM NO se consulta.
-  - Candidato requerido       -> se ejecuta. El LLM NO se consulta.
-  - Solo candidatos opcionales-> bifurcación real: el LLM elige entre
-                                 {candidatos..., "SKIP"} con salida
-                                 restringida por JSON schema (enum).
-  - Cualquier fallo del LLM   -> acción por defecto determinista
-                                 ("fail closed"), anotada en el log.
+  - Candidato no saltable     -> se ejecuta, en orden canónico. Sin LLM.
+                                 (Por defecto TODOS los pasos son no
+                                 saltables: el planner es determinista.)
+  - Candidato en `skippable`  -> pregunta binaria acotada
+                                 {tool, "SKIP"} con salida restringida
+                                 por JSON schema (enum).
+  - Fallo del LLM             -> se ejecuta el paso (fail closed).
+  - Todo SKIP queda anotado en state.notes y en `decisions`.
 
-El LLM nunca genera argumentos ni nombres de tool libres: solo devuelve
-un valor del enum. Eso elimina la alucinación de tools/args/paths.
+El LLM nunca genera argumentos ni nombres de tool libres.
 """
 from __future__ import annotations
 
@@ -41,7 +42,7 @@ _STAGES: tuple[tuple[str, int, bool], ...] = (
     ("prioritize_variants", 8, False),
 )
 _STAGE = {t: s for t, s, _ in _STAGES}
-_REQUIRED = {t for t, _, r in _STAGES if r}
+OPTIONAL_TOOLS = frozenset(t for t, _, r in _STAGES if not r)
 
 # regla del RuleBasedPlanner que genera la acción de cada tool
 _RULE_ATTR = {
@@ -58,9 +59,9 @@ _RULE_ATTR = {
 
 FORK_SYSTEM_PROMPT = (
     "You are a routing function inside a clinical genomics pipeline. "
-    "Pick exactly one option from the allowed list. "
-    "Prefer the first option unless the case summary clearly says it is "
-    "not useful. Output JSON only."
+    "Answer with exactly one allowed option. Choose SKIP only if the case "
+    "summary gives a concrete reason the step is not useful; otherwise run "
+    "the step. Output JSON only."
 )
 
 
@@ -135,6 +136,17 @@ def build_chooser(cfg) -> "OllamaChooser | None":
                          timeout=cfg.timeout_seconds, num_ctx=cfg.num_ctx)
 
 
+def parse_skippable(text: str) -> frozenset[str]:
+    """'a,b' -> frozenset. Solo admite pasos opcionales conocidos."""
+    names = frozenset(t.strip() for t in (text or "").split(",") if t.strip())
+    bad = names - OPTIONAL_TOOLS
+    if bad:
+        raise ValueError(
+            f"no saltable(s): {sorted(bad)}; opcionales válidos: {sorted(OPTIONAL_TOOLS)}"
+        )
+    return names
+
+
 def _norm(d: dict) -> tuple:
     return tuple(sorted((k, str(v)) for k, v in d.items()))
 
@@ -146,6 +158,7 @@ class DecisionPlanner:
     chooser: Chooser | None = None
     rules: RuleBasedPlanner = field(default_factory=RuleBasedPlanner)
     max_attempts: int = 2          # reintentos por (tool, args) fallidos
+    skippable: frozenset[str] = frozenset()   # pasos que el LLM puede saltar
     decisions: list[dict[str, Any]] = field(default_factory=list)
     _skipped: set[str] = field(default_factory=set)
 
@@ -157,28 +170,19 @@ class DecisionPlanner:
             return self._log(state, [], None, "rule", "sin candidatos: stop")
 
         first = cands[0]
-        if first.tool_name in _REQUIRED:
-            return self._log(state, cands, first, "rule", "paso requerido")
+        if first.tool_name not in self.skippable or self.chooser is None:
+            why = "paso requerido" if first.tool_name not in self.skippable \
+                else "sin chooser: se ejecuta"
+            return self._log(state, cands, first, "rule", why)
 
-        # Bifurcación: opcionales por delante del siguiente requerido.
-        next_req = next(
-            (_STAGE[c.tool_name] for c in cands if c.tool_name in _REQUIRED),
-            99,
-        )
-        fork = [c for c in cands
-                if c.tool_name not in _REQUIRED and _STAGE[c.tool_name] < next_req]
-        default = fork[0]
-
-        if self.chooser is None or len(fork) == 0:
-            return self._log(state, fork, default, "rule", "sin chooser: defecto")
-
-        choice, src, note = self._ask(state, fork)
+        choice, src, note = self._ask(state, first)
         if choice == SKIP:
-            for c in fork:
-                self._skipped.add(c.tool_name)
-            return self.next_action(state)  # re-evalúa sin los saltados
-        picked = next(c for c in fork if c.tool_name == choice)
-        return self._log(state, fork, picked, src, note)
+            self._skipped.add(first.tool_name)
+            state.note(f"decision_planner[{src}]: SKIP {first.tool_name} ({note})")
+            self.decisions.append({"event": "skip", "tool": first.tool_name,
+                                   "source": src})
+            return self.next_action(state)  # re-evalúa sin el saltado
+        return self._log(state, cands, first, src, note)
 
     # --- candidatos ------------------------------------------------------
 
@@ -206,9 +210,8 @@ class DecisionPlanner:
 
     # --- LLM restringido -------------------------------------------------
 
-    def _ask(self, state: AgentState, fork: list[PlannedAction]):
-        names = [c.tool_name for c in fork]
-        enum = names + [SKIP]
+    def _ask(self, state: AgentState, action: PlannedAction):
+        enum = [action.tool_name, SKIP]
         schema = {
             "type": "object",
             "properties": {"choice": {"type": "string", "enum": enum}},
@@ -217,9 +220,8 @@ class DecisionPlanner:
         }
         user = (
             "Case summary:\n" + self._summary(state)
-            + "\nAllowed options:\n"
-            + "\n".join(f"- {c.tool_name}: {c.rationale}" for c in fork)
-            + f"\n- {SKIP}: skip these optional steps\n"
+            + f"\nOptional step: {action.tool_name}: {action.rationale}\n"
+            + f"Allowed options: {action.tool_name} (run it) or {SKIP}.\n"
         )
         meta = {
             "model": getattr(self.chooser, "model_id", "?"),
@@ -231,10 +233,10 @@ class DecisionPlanner:
             choice = json.loads(raw)["choice"]
             if choice not in enum:
                 raise ValueError(f"valor fuera del enum: {choice!r}")
-        except Exception as e:  # noqa: BLE001  fail closed
-            state.note(f"decision_planner: LLM falló ({type(e).__name__}); defecto")
+        except Exception as e:  # noqa: BLE001  fail closed: se ejecuta
+            state.note(f"decision_planner: LLM falló ({type(e).__name__}); se ejecuta")
             self.decisions.append({"event": "llm_fallback", "error": str(e), **meta})
-            return names[0], "fallback", "defecto tras fallo del LLM"
+            return action.tool_name, "fallback", "defecto tras fallo del LLM"
         self.decisions.append({"event": "llm_choice", "choice": choice,
                                "options": enum, **meta})
         return choice, "llm", "elección acotada"

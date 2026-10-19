@@ -638,6 +638,11 @@ def run_trio(
         "rule", "--planner", "-p",
         help="rule (determinista) | llm (híbrido, legacy) | decision (determinista + LLM solo en bifurcaciones)",
     ),
+    skippable: str = typer.Option(
+        "", "--skippable",
+        help="Pasos opcionales que el LLM puede saltar con --planner decision "
+             "(lista separada por comas, p.ej. prioritize_variants). Vacío = ninguno.",
+    ),
     clinvar: str = typer.Option(
         None, "--clinvar",
         help="VCF de ClinVar (opcional). Si se pasa, se anota el VCF final.",
@@ -729,11 +734,14 @@ def run_trio(
     elif planner_kind == "decision":
         from publicgenomicagent.agent.config import load_config
         from publicgenomicagent.agent.decision_planner import (
-            DecisionPlanner, build_chooser,
+            DecisionPlanner, build_chooser, parse_skippable,
         )
 
         cfg = load_config().llm
-        planner = DecisionPlanner(chooser=build_chooser(cfg))
+        planner = DecisionPlanner(
+            chooser=build_chooser(cfg),
+            skippable=parse_skippable(skippable),
+        )
         console.print(
             f"[dim]planner=decision (determinista; LLM solo en bifurcaciones) "
             f"model={cfg.model}[/dim]"
@@ -1019,6 +1027,11 @@ def sandbox_run(
         "rule", "--planner", "-p",
         help="rule | llm (híbrido, legacy) | decision (determinista + LLM solo en bifurcaciones)",
     ),
+    skippable: str = typer.Option(
+        "", "--skippable",
+        help="Pasos opcionales que el LLM puede saltar con --planner decision "
+             "(lista separada por comas, p.ej. prioritize_variants). Vacío = ninguno.",
+    ),
     clinvar: str = typer.Option(
         None, "--clinvar",
         help="VCF de ClinVar (opcional)",
@@ -1154,9 +1167,12 @@ def sandbox_run(
     elif planner_kind == "decision":
         from publicgenomicagent.agent.config import load_config
         from publicgenomicagent.agent.decision_planner import (
-            DecisionPlanner, build_chooser,
+            DecisionPlanner, build_chooser, parse_skippable,
         )
-        planner = DecisionPlanner(chooser=build_chooser(load_config().llm))
+        planner = DecisionPlanner(
+            chooser=build_chooser(load_config().llm),
+            skippable=parse_skippable(skippable),
+        )
     else:
         console.print("[red]--planner debe ser rule, llm o decision[/red]")
         raise typer.Exit(code=2)

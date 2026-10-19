@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from publicgenomicagent.agent.decision_planner import DecisionPlanner, SKIP
+from publicgenomicagent.agent.decision_planner import DecisionPlanner, OPTIONAL_TOOLS, SKIP
 from publicgenomicagent.agent.planner import RuleFirstLLMPlanner
 from publicgenomicagent.agent.state import AgentState, ToolCallRecord
 from publicgenomicagent.tools.base import CaseManifest, GenomicRange, IndividualSpec
@@ -65,7 +65,7 @@ def drive(p, st, limit=40, ok=True):
 
 def test_trio_pipeline_order_and_termination_without_llm(tmp_path):
     st = FakeState(tmp_path); ch = Chooser(lambda s: json.dumps({"choice": s["properties"]["choice"]["enum"][0]}))
-    p = DecisionPlanner(chooser=ch)
+    p = DecisionPlanner(chooser=ch, skippable=OPTIONAL_TOOLS)
     seq = drive(p, st)
     assert seq.count("qc_bam") == 3 and seq.count("fetch_roi") == 3
     assert seq.index("joint_call") < seq.index("annotate_variants") < seq.index("mendelian_filter") < seq.index("prioritize_variants")
@@ -74,36 +74,38 @@ def test_trio_pipeline_order_and_termination_without_llm(tmp_path):
 
 def test_llm_never_consulted_when_no_candidates(tmp_path):
     st = FakeState(tmp_path); ch = Chooser(lambda s: json.dumps({"choice": SKIP}))
-    p = DecisionPlanner(chooser=ch); drive(p, st)
+    p = DecisionPlanner(chooser=ch, skippable=OPTIONAL_TOOLS); drive(p, st)
     assert p.next_action(st) is None
     for schema in ch.calls:   # solo se llamó en bifurcaciones, siempre con enum acotado
         assert SKIP in schema["properties"]["choice"]["enum"]
 
 def test_llm_not_consulted_for_required_steps(tmp_path):
     st = FakeState(tmp_path); ch = Chooser(lambda s: json.dumps({"choice": SKIP}))
-    p = DecisionPlanner(chooser=ch)
+    p = DecisionPlanner(chooser=ch, skippable=OPTIONAL_TOOLS)
     for _ in range(9): _run(st, p.next_action(st))     # qc*3 + fetch*3 + call*3
     assert ch.calls == []
 
 def test_skip_skips_optionals_but_not_required(tmp_path):
     st = FakeState(tmp_path); ch = Chooser(json.dumps({"choice": SKIP}))
-    seq = drive(DecisionPlanner(chooser=ch), st)
+    p = DecisionPlanner(chooser=ch, skippable=OPTIONAL_TOOLS)
+    seq = drive(p, st)
+    assert any("SKIP annotate_variants" in n for n in st.notes)   # auditable
     assert "annotate_variants" not in seq and "prioritize_variants" not in seq
     assert "mendelian_filter" in seq and "joint_call" in seq
 
 def test_llm_failure_fails_closed_to_default(tmp_path):
-    st = FakeState(tmp_path); p = DecisionPlanner(chooser=Chooser(boom=True))
+    st = FakeState(tmp_path); p = DecisionPlanner(chooser=Chooser(boom=True), skippable=OPTIONAL_TOOLS)
     seq = drive(p, st)
     assert "annotate_variants" in seq and "prioritize_variants" in seq     # = comportamiento determinista
     assert any(d["event"] == "llm_fallback" for d in p.decisions)
 
 def test_out_of_enum_reply_is_rejected(tmp_path):
-    st = FakeState(tmp_path); p = DecisionPlanner(chooser=Chooser(json.dumps({"choice": "rm_rf"})))
+    st = FakeState(tmp_path); p = DecisionPlanner(chooser=Chooser(json.dumps({"choice": "rm_rf"})), skippable=OPTIONAL_TOOLS)
     assert "annotate_variants" in drive(p, st)
     assert any(d["event"] == "llm_fallback" for d in p.decisions)
 
 def test_garbage_json_is_rejected(tmp_path):
-    st = FakeState(tmp_path); p = DecisionPlanner(chooser=Chooser("blah ```json"))
+    st = FakeState(tmp_path); p = DecisionPlanner(chooser=Chooser("blah ```json"), skippable=OPTIONAL_TOOLS)
     assert "prioritize_variants" in drive(p, st)
 
 def test_no_chooser_equals_deterministic(tmp_path):
@@ -122,7 +124,7 @@ def test_hpo_text_adds_optional_branch(tmp_path):
     assert seq.index("extract_hpo") < seq.index("phenotype_ranking")
 
 def test_decisions_are_logged_with_prompt_hash(tmp_path):
-    st = FakeState(tmp_path); p = DecisionPlanner(chooser=Chooser(lambda s: json.dumps({"choice": s["properties"]["choice"]["enum"][0]})))
+    st = FakeState(tmp_path); p = DecisionPlanner(chooser=Chooser(lambda s: json.dumps({"choice": s["properties"]["choice"]["enum"][0]})), skippable=OPTIONAL_TOOLS)
     drive(p, st)
     llm = [d for d in p.decisions if d["event"] == "llm_choice"]
     assert llm and all(d["model"] == "fake" and len(d["prompt_sha256"]) == 16 for d in llm)
@@ -166,7 +168,7 @@ def test_ollama_chooser_sends_enum_schema_and_parses_reply(tmp_path):
         ch = OllamaChooser(model="qwen2.5:3b",
                            endpoint=f"http://127.0.0.1:{srv.server_port}/api/generate", timeout=5)
         st = FakeState(tmp_path)
-        p = DecisionPlanner(chooser=ch)
+        p = DecisionPlanner(chooser=ch, skippable=OPTIONAL_TOOLS)
         seq = drive(p, st)
     finally:
         srv.shutdown()
@@ -176,3 +178,36 @@ def test_ollama_chooser_sends_enum_schema_and_parses_reply(tmp_path):
     assert "annotate_variants" not in seq            # SKIP respetado
     assert ch.model_id == "qwen2.5:3b@abcdef123456"
     assert any(d.get("model", "").endswith("@abcdef123456") for d in p.decisions)
+
+
+def test_default_never_asks_llm_and_runs_hpo_step_even_if_llm_says_skip(tmp_path):
+    """Regresión: el 3B descartó phenotype_ranking con HPO presente (sesión real CYP2D6)."""
+    st = FakeState(tmp_path, clinvar=False)
+    st.case.hpo_terms = {"P": ["HP:0001939"]}
+    ch = Chooser(json.dumps({"choice": SKIP}))
+    seq = drive(DecisionPlanner(chooser=ch), st)
+    assert "phenotype_ranking" in seq and "prioritize_variants" in seq
+    assert seq.index("phenotype_ranking") < seq.index("prioritize_variants")
+    assert ch.calls == []
+
+
+def test_only_declared_skippable_steps_are_offered(tmp_path):
+    st = FakeState(tmp_path, clinvar=False)
+    st.case.hpo_terms = {"P": ["HP:0001939"]}
+    ch = Chooser(json.dumps({"choice": SKIP}))
+    p = DecisionPlanner(chooser=ch, skippable=frozenset({"prioritize_variants"}))
+    seq = drive(p, st)
+    assert "phenotype_ranking" in seq and "prioritize_variants" not in seq
+    assert len(ch.calls) == 1
+    assert ch.calls[0]["properties"]["choice"]["enum"] == ["prioritize_variants", SKIP]
+    assert any("SKIP prioritize_variants" in n for n in st.notes)
+
+
+def test_parse_skippable_rejects_required_steps():
+    from publicgenomicagent.agent.decision_planner import parse_skippable
+    import pytest
+    assert parse_skippable("") == frozenset()
+    assert parse_skippable("prioritize_variants, annotate_variants") == frozenset(
+        {"prioritize_variants", "annotate_variants"})
+    with pytest.raises(ValueError):
+        parse_skippable("mendelian_filter")
