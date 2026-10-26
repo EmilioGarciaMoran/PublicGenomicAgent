@@ -336,7 +336,7 @@ valor real de los pangenomas locales con benchmarks reproducibles.
 - Publicación (Bioinformatics, GigaScience).
 - Validación clínica en colaboración con hospitales.
 
-**Tests**: 203 passed (170 unit, 33 integration).
+**Tests**: unit and integration suites (counts: see CI at the time of writing).
 
 ---
 

@@ -1,6 +1,6 @@
 # PublicGenomicAgent
 
-**A clinical-grade, privacy-first auditable genomic workflow for clinical analysis.**
+**A privacy-first, auditable genomic workflow prototype for clinical research.**
 
 Given a clinical phenotype, a family structure, and pre-aligned BAMs,
 PublicGenomicAgent analyzes only the relevant regions of interest (ROIs)
@@ -83,7 +83,7 @@ See [`docs/privacy.md`](docs/privacy.md) for the full policy.
 ```
 Clinical text
     ↓
-extract_hpo (RDMA, GPU optional)  →  HPO terms
+extract_hpo (pleio-hpo, CPU)      →  HPO terms
     ↓
 phenotype_ranking (LIRICAL, CPU)  →  ranked diseases
     ↓
@@ -122,7 +122,8 @@ micromamba run -p ~/.pga/envs/pga-core pip install -e .
 ~/.pga/envs/pga-core/bin/pga env verify
 ```
 
-Optional phenotype layer (requires GPU ≥ 20 GB or a dedicated server):
+Optional RDMA backend for HPO extraction (requires GPU ≥ 20 GB or a dedicated
+server; the default `pleio-hpo` backend runs on CPU):
 
 ```bash
 ~/.pga/envs/pga-core/bin/pga env bootstrap pga-phenotype
@@ -173,7 +174,7 @@ and deterministic execution:
 | `build_local_graph` | Build a vg graph from reference + cohort VCF | yes |
 | `align_to_graph` | Align reads against a vg graph (vg giraffe) | yes |
 | `call_from_graph` | Call variants from graph + pack (vg call) | yes |
-| `extract_hpo` | Extract HPO terms from clinical text (RDMA) | no |
+| `extract_hpo` | Extract HPO terms from clinical text (`pleio-hpo` on CPU; RDMA backend needs GPU) | no |
 | `phenotype_ranking` | LIRICAL-based candidate ranking from HPO ± VCF | no |
 | `annotate_variants` | Copy CLNSIG/CLNDN columns from a ClinVar VCF | yes |
 | `prioritize_variants` | Score and rank variants by clinical rules | no |
@@ -223,9 +224,9 @@ machine with Python 3.11+ and the `pga-core` environment.
 ## Tests
 
 ```bash
-pytest tests/unit/         # 170 unit tests, no environment needed
-pytest tests/integration/  # 33 integration tests, requires micromamba
-pytest -q                  # 203 tests total
+pytest tests/unit/         # unit tests, no environment needed
+pytest tests/integration/  # integration tests, requires micromamba
+pytest -q                  # everything
 ```
 
 The CI pipeline runs on every push: unit tests in a matrix of Python
@@ -320,7 +321,7 @@ Loop: 12 iteraciones
   OK prioritize_variants
 ```
 
-Result: one recessive candidate at `chr2:42128941 A>T` with the
+Result: one recessive candidate at `chr22:42128941 A>T` with the
 expected genotypes (`father 0/1`, `mother 0/1`, `proband 1/1`).
 
 The full pipeline is covered by
@@ -356,7 +357,7 @@ Reproducible demos:
 
 ## Status
 
-**Active development. 17 tools, 5 isolated environments, 203 tests passing.**
+**Active development. 17 tools, 6 isolated environments; unit and integration test suites run in CI.**
 
 - Genomic layer (no GPU): complete and tested end-to-end.
 - NL → CaseManifest extraction: functional with local LLM
@@ -366,7 +367,8 @@ Reproducible demos:
   detects manipulation of `session.json`.
 - CI: unit matrix (3.11/3.12) + blocking end-to-end smoke test.
 - GIAB HG002 real case processed (1765 variants in chr1:1-2 Mb).
-- Phenotype layer (HPO extraction with RDMA): requires GPU ≥ 20 GB.
+- Phenotype layer: HPO extraction runs on CPU (`pleio-hpo`); the RDMA
+  backend requires GPU ≥ 20 GB.
   See [`docs/phenotype_layer.md`](docs/phenotype_layer.md) §14.
 
 ## Contact
