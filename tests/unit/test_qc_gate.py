@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from publicgenomicagent.agent.decision_planner import DecisionPlanner
 from publicgenomicagent.agent.loop import AgentLoop
 from publicgenomicagent.agent.planner import PlannedAction, RuleBasedPlanner
@@ -159,3 +161,68 @@ def test_compare_reference_ok_and_missing_contig():
     assert len(issues) == 1 and "ausentes" in issues[0]
     assert compare_reference(QCHeader(references=["chr1"], reference_lengths={"chr1": 10}),
                              {"chr1": 10}) == ([], [])
+
+
+# --- verificación familiar en la puerta ----------------------------------
+
+def _all_qc_passed(st):
+    for s in ("father", "mother", "proband"):
+        _qc(st, s, True)
+
+
+def _rel(st, status, issues=None):
+    st.record(tool_name="verify_relatedness", inp={"bams": []},
+              out={"status": status, "issues": issues or []}, duration_ms=1)
+
+
+def test_relatedness_not_required_without_sites_panel(tmp_path):
+    st = _trio_state(tmp_path); _all_qc_passed(st)
+    g = qc_gate(st)
+    assert g.open and g.relatedness is None
+
+
+def test_relatedness_required_and_scheduled_after_qc(tmp_path):
+    st = _trio_state(tmp_path); st.references["relatedness_sites"] = tmp_path / "sites.vcf.gz"
+    _qc(st, "father", True)
+    assert RuleBasedPlanner().next_action(st).tool_name == "qc_bam"   # primero todo el QC
+    _qc(st, "mother", True); _qc(st, "proband", True)
+    g = qc_gate(st)
+    assert not g.open and g.relatedness == "pending" and g.bams_ok
+    for planner in (RuleBasedPlanner(), DecisionPlanner()):
+        a = planner.next_action(st)
+        assert a.tool_name == "verify_relatedness"
+        assert [s for s, _ in a.args["bams"]] == ["father", "mother", "proband"]
+
+
+def test_relatedness_not_scheduled_if_a_bam_failed_qc(tmp_path):
+    st = _trio_state(tmp_path); st.references["relatedness_sites"] = tmp_path / "s.vcf"
+    _qc(st, "father", True); _qc(st, "mother", False); _qc(st, "proband", True)
+    assert RuleBasedPlanner().next_action(st) is None
+
+
+@pytest.mark.parametrize("status,is_open", [
+    ("passed", True), ("warning", True), ("failed", False), ("not_verifiable", False)])
+def test_gate_by_relatedness_status(tmp_path, status, is_open):
+    st = _trio_state(tmp_path); st.references["relatedness_sites"] = tmp_path / "s.vcf"
+    _all_qc_passed(st); _rel(st, status, ["father–proband: incompatible"])
+    g = qc_gate(st)
+    assert g.open is is_open and g.relatedness == status
+    if status == "failed":
+        assert "familia" in g.failed and "incompatible" in g.reason()
+
+
+def test_not_verifiable_needs_recorded_human_override(tmp_path):
+    st = _trio_state(tmp_path); st.references["relatedness_sites"] = tmp_path / "s.vcf"
+    _all_qc_passed(st); _rel(st, "not_verifiable")
+    assert not qc_gate(st).open
+    st.gate_overrides.append("relatedness_not_verifiable")
+    assert qc_gate(st).open
+    assert "relatedness_not_verifiable" in st.model_dump(mode="json")["gate_overrides"]
+
+
+def test_loop_blocks_analysis_when_family_check_failed(tmp_path):
+    st = _trio_state(tmp_path); st.references["relatedness_sites"] = tmp_path / "s.vcf"
+    _all_qc_passed(st); _rel(st, "failed", ["father–proband: incompatible"])
+    before = len(st.tool_calls)
+    AgentLoop(planner=_PushyPlanner()).run(SessionContext(state=st))
+    assert len(st.tool_calls) == before

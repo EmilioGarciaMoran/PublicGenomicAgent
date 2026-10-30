@@ -33,14 +33,15 @@ SKIP = "SKIP"
 # (tool_name, stage, required)
 _STAGES: tuple[tuple[str, int, bool], ...] = (
     ("qc_bam", 0, True),
-    ("fetch_roi", 1, True),
-    ("call_variants", 2, True),
-    ("joint_call", 3, True),
-    ("annotate_variants", 4, False),
-    ("mendelian_filter", 5, True),
-    ("extract_hpo", 6, False),
-    ("phenotype_ranking", 7, False),
-    ("prioritize_variants", 8, False),
+    ("verify_relatedness", 1, True),
+    ("fetch_roi", 2, True),
+    ("call_variants", 3, True),
+    ("joint_call", 4, True),
+    ("annotate_variants", 5, False),
+    ("mendelian_filter", 6, True),
+    ("extract_hpo", 7, False),
+    ("phenotype_ranking", 8, False),
+    ("prioritize_variants", 9, False),
 )
 _STAGE = {t: s for t, s, _ in _STAGES}
 OPTIONAL_TOOLS = frozenset(t for t, _, r in _STAGES if not r)
@@ -48,6 +49,7 @@ OPTIONAL_TOOLS = frozenset(t for t, _, r in _STAGES if not r)
 # regla del RuleBasedPlanner que genera la acción de cada tool
 _RULE_ATTR = {
     "qc_bam": "_rule_qc",
+    "verify_relatedness": "_rule_verify_relatedness",
     "fetch_roi": "_rule_fetch_roi",
     "call_variants": "_rule_call_variants",
     "joint_call": "_rule_joint_call",

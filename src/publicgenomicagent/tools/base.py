@@ -284,6 +284,33 @@ class IndividualSpec(BaseModel):
     affected: bool = False
     father: str | None = None          # sample del padre, si aplica
     mother: str | None = None          # sample de la madre, si aplica
+    phenotype_known: bool = True       # False si el PED dice 0/-9 (desconocido)
+
+
+class VerifyRelatednessInput(BaseModel):
+    """Verificación familiar con IBS local (ver tools/relatedness.py)."""
+    bams: list[tuple[str, Path]]          # (sample del PED, BAM completo)
+    reference_fasta: Path
+    sites: Path                           # VCF(.gz) o TSV CHROM POS REF ALT
+    pedigree: list[IndividualSpec]
+    output_dir: Path
+    min_dp: int = 7
+    min_sites: int = 100                 # P(no ver IBS0 de un padre falso) ~ e^(-0.07 n)
+    min_hets: int = 10
+    max_parent_ibs0: float = 0.01
+    dup_relatedness: float = 0.85
+    deficit_tol: float = 0.2
+    undeclared_relatedness: float = 0.3
+
+
+class VerifyRelatednessOutput(ToolOutput):
+    status: str                           # passed | warning | failed | not_verifiable
+    n_sites_panel: int
+    samples: list[str] = []
+    pairs: list[dict] = []
+    issues: list[str] = []
+    warnings: list[str] = []
+    genotypes_vcf: Path | None = None
 
 
 class MendelianFilterInput(BaseModel):

@@ -30,6 +30,7 @@ EXPECTED_TOOLS = {
     "plink_validate",
     "prioritize_variants",
     "qc_bam",
+    "verify_relatedness",
 }
 
 

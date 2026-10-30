@@ -26,6 +26,37 @@ def _registry():
     return load_registry(registry_path())
 
 
+def _apply_family_options(state, ped, relatedness_sites, allow_unverified) -> None:
+    """Aplica --ped, --relatedness-sites y la excepción humana al estado."""
+    if ped:
+        from publicgenomicagent.tools.pedigree import find_proband, load_ped, validate_pedigree
+
+        fids, inds = load_ped(Path(ped))
+        v = validate_pedigree(inds, fids, sequenced=set(state.bams))
+        for w in v.warnings:
+            console.print(f"[yellow]PED aviso:[/yellow] {w}")
+        if not v.ok:
+            for i in v.issues:
+                console.print(f"[red]PED error:[/red] {i}")
+            raise typer.Exit(code=2)
+        state.case.pedigree = inds
+        if state.case.proband not in {i.sample for i in inds}:
+            state.case.proband = find_proband(inds)
+        state.note(f"pedigrí desde PED confirmado: {Path(ped).name} "
+                   f"({len(inds)} individuos; avisos: {len(v.warnings)})")
+    if relatedness_sites:
+        sp = Path(relatedness_sites).expanduser().resolve()
+        if not sp.exists():
+            console.print(f"[red]Panel de sitios no existe:[/red] {sp}")
+            raise typer.Exit(code=2)
+        state.references["relatedness_sites"] = sp
+    if allow_unverified:
+        from publicgenomicagent.agent.qc_gate import OVERRIDE_UNVERIFIABLE
+
+        state.gate_overrides.append(OVERRIDE_UNVERIFIABLE)
+        state.note("excepción humana: se acepta verificación familiar no verificable")
+
+
 def _runtime():
     return ToolRuntime(_registry())
 
@@ -651,6 +682,21 @@ def run_trio(
         None, "--hpo-text",
         help="Texto clinico para extraer HPO (backend pleio-hpo, CPU)",
     ),
+    ped: str = typer.Option(
+        None, "--ped",
+        help="PED confirmado del caso (FID IID PID MID SEX PHENO). Sustituye "
+             "al pedigrí implícito y se valida contra los BAM.",
+    ),
+    relatedness_sites: str = typer.Option(
+        None, "--relatedness-sites",
+        help="Panel de SNV comunes (VCF o TSV CHROM POS REF ALT). Activa la "
+             "verificación familiar (IBS local) como parte de la puerta de QC.",
+    ),
+    allow_unverified_relatedness: bool = typer.Option(
+        False, "--allow-unverified-relatedness",
+        help="Decisión humana: continuar si la verificación familiar resulta "
+             "'no verificable' (pocos sitios). Queda registrada en la sesión.",
+    ),
 ) -> None:
     """Ejecuta el loop agéntico sobre un trío.
 
@@ -703,6 +749,7 @@ def run_trio(
         state.references["clinvar"] = clinvar_path
         console.print(f"[dim]ClinVar configurado: {clinvar_path.name}[/dim]")
 
+    _apply_family_options(state, ped, relatedness_sites, allow_unverified_relatedness)
     ctx = SessionContext(state=state, runtime=_runtime())
     from publicgenomicagent.agent.planner import (
         RuleBasedPlanner,
@@ -1040,6 +1087,21 @@ def sandbox_run(
         None, "--hpo-text",
         help="Texto clinico para extraer HPO (backend pleio-hpo, CPU)",
     ),
+    ped: str = typer.Option(
+        None, "--ped",
+        help="PED confirmado del caso (FID IID PID MID SEX PHENO). Sustituye "
+             "al pedigrí implícito y se valida contra los BAM.",
+    ),
+    relatedness_sites: str = typer.Option(
+        None, "--relatedness-sites",
+        help="Panel de SNV comunes (VCF o TSV CHROM POS REF ALT). Activa la "
+             "verificación familiar (IBS local) como parte de la puerta de QC.",
+    ),
+    allow_unverified_relatedness: bool = typer.Option(
+        False, "--allow-unverified-relatedness",
+        help="Decisión humana: continuar si la verificación familiar resulta "
+             "'no verificable' (pocos sitios). Queda registrada en la sesión.",
+    ),
     max_steps: int = typer.Option(20, "--max-steps"),
 ) -> None:
     """Ejecuta el pipeline de PGA sobre un caso Sandbox."""
@@ -1177,6 +1239,7 @@ def sandbox_run(
         console.print("[red]--planner debe ser rule, llm o decision[/red]")
         raise typer.Exit(code=2)
 
+    _apply_family_options(state, ped, relatedness_sites, allow_unverified_relatedness)
     ctx = SessionContext(state=state, runtime=_runtime())
     loop = AgentLoop(max_steps=max_steps, planner=planner)
     results = loop.run(ctx)

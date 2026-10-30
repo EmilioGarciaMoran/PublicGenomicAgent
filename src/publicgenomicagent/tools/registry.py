@@ -57,6 +57,8 @@ from .base import (
     QCBamInput,
     QCBamOutput,
     ToolOutput,
+    VerifyRelatednessInput,
+    VerifyRelatednessOutput,
 )
 from .annotate import annotate_variants
 from .prioritize import prioritize_variants
@@ -71,6 +73,7 @@ from .local_pangenome import local_pangenome
 from .mendelian import mendelian_filter, plink_validate
 from .phenotype_ranking import phenotype_ranking
 from .qc import qc_bam
+from .relatedness import verify_relatedness
 
 
 @dataclass(frozen=True)
@@ -112,6 +115,15 @@ TOOL_REGISTRY: dict[str, ToolSpec] = {
         needs_runtime=True,
         description="QC de un BAM: header, índice, orden, muestras, counts.",
         tags=("hts", "qc"),
+    ),
+    "verify_relatedness": ToolSpec(
+        name="verify_relatedness",
+        func=verify_relatedness,
+        input_model=VerifyRelatednessInput,
+        output_model=VerifyRelatednessOutput,
+        needs_runtime=True,
+        description="Verificación familiar: IBS0/IBS2/relatedness local frente al PED.",
+        tags=("hts", "qc", "pedigree"),
     ),
     "call_variants": ToolSpec(
         name="call_variants",

@@ -28,7 +28,7 @@ from .llm import (
     parse_llm_response,
 )
 from .prompts import SYSTEM_PROMPT, render_user_prompt
-from .qc_gate import qc_args, qc_gate
+from .qc_gate import qc_args, qc_gate, relatedness_args, relatedness_required
 from .state import AgentState
 
 
@@ -98,6 +98,9 @@ class RuleBasedPlanner:
         qc = self._rule_qc(state)
         if qc is not None:
             return qc
+        rel = self._rule_verify_relatedness(state)
+        if rel is not None:
+            return rel
         # 2. Puerta: sin QC aprobado de todos los BAMs, no hay análisis.
         gate = qc_gate(state)
         if not gate.open:
@@ -138,6 +141,20 @@ class RuleBasedPlanner:
                     rationale=f"QC pendiente del BAM de {sample}.",
                 )
         return None
+
+    def _rule_verify_relatedness(self, state: AgentState) -> PlannedAction | None:
+        """Verificación familiar tras el QC de todos los BAM, una sola vez."""
+        if not relatedness_required(state):
+            return None
+        if not qc_gate(state).bams_ok:
+            return None
+        if any(c.ok for c in state.calls_of("verify_relatedness")):
+            return None
+        return PlannedAction(
+            tool_name="verify_relatedness",
+            args=relatedness_args(state),
+            rationale="QC de BAMs aprobado; verificamos parentesco frente al PED.",
+        )
 
     def _rule_fetch_roi(self, state: AgentState) -> PlannedAction | None:
         rois = state.case.candidate_rois

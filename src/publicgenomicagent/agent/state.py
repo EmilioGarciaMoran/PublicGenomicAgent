@@ -104,6 +104,10 @@ class AgentState(BaseModel):
     outputs: dict[str, dict[str, Any]] = Field(default_factory=dict)
     notes: list[str] = Field(default_factory=list)
 
+    # Excepciones a la puerta de verificación decididas por una persona
+    # (p.ej. "relatedness_not_verifiable"). Quedan en el session.json.
+    gate_overrides: list[str] = Field(default_factory=list)
+
     # --- API de consulta -------------------------------------------------
 
     def latest(self, tool_name: str) -> dict[str, Any] | None:
