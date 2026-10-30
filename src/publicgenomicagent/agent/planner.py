@@ -28,6 +28,7 @@ from .llm import (
     parse_llm_response,
 )
 from .prompts import SYSTEM_PROMPT, render_user_prompt
+from .qc_gate import qc_args, qc_gate
 from .state import AgentState
 
 
@@ -93,8 +94,17 @@ class RuleBasedPlanner:
         self._roi_dir_override = roi_dir
 
     def next_action(self, state: AgentState) -> PlannedAction | None:
+        # 1. Verificación primero.
+        qc = self._rule_qc(state)
+        if qc is not None:
+            return qc
+        # 2. Puerta: sin QC aprobado de todos los BAMs, no hay análisis.
+        gate = qc_gate(state)
+        if not gate.open:
+            state.note(f"rule_planner: puerta QC cerrada; stop ({gate.reason()})")
+            return None
+        # 3. Análisis, en orden canónico.
         for rule in (
-            self._rule_qc,
             self._rule_fetch_roi,
             self._rule_call_variants,
             self._rule_joint_call,
@@ -102,12 +112,6 @@ class RuleBasedPlanner:
             self._rule_mendelian,
             self._rule_extract_hpo,
             self._rule_phenotype_ranking,
-            self._rule_qc,
-            self._rule_fetch_roi,
-            self._rule_call_variants,
-            self._rule_joint_call,
-            self._rule_annotate,
-            self._rule_mendelian,
             self._rule_prioritize,
         ):
             action = rule(state)
@@ -130,7 +134,7 @@ class RuleBasedPlanner:
             if not already:
                 return PlannedAction(
                     tool_name="qc_bam",
-                    args={"bam_path": bam, "level": "structural"},
+                    args=qc_args(state, sample, bam),
                     rationale=f"QC pendiente del BAM de {sample}.",
                 )
         return None

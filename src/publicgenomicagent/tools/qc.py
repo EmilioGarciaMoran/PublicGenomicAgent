@@ -12,6 +12,7 @@ def _parse_header(runtime: ToolRuntime, bam: Path) -> QCHeader:
     raw = runtime.capture("samtools", ["view", "-H", str(bam)])
     sort_order: str | None = None
     references: list[str] = []
+    lengths: dict[str, int] = {}
     read_groups: list[str] = []
     samples: list[str] = []
 
@@ -25,9 +26,19 @@ def _parse_header(runtime: ToolRuntime, bam: Path) -> QCHeader:
                 if f.startswith("SO:"):
                     sort_order = f.split(":", 1)[1]
         elif tag == "@SQ":
+            sn, ln = None, None
             for f in fields[1:]:
                 if f.startswith("SN:"):
-                    references.append(f.split(":", 1)[1])
+                    sn = f.split(":", 1)[1]
+                elif f.startswith("LN:"):
+                    try:
+                        ln = int(f.split(":", 1)[1])
+                    except ValueError:
+                        ln = None
+            if sn is not None:
+                references.append(sn)
+                if ln is not None:
+                    lengths[sn] = ln
         elif tag == "@RG":
             for f in fields[1:]:
                 if f.startswith("ID:"):
@@ -40,6 +51,7 @@ def _parse_header(runtime: ToolRuntime, bam: Path) -> QCHeader:
     return QCHeader(
         sort_order=sort_order,
         references=references,
+        reference_lengths=lengths,
         read_groups=read_groups,
         samples=samples,
     )
@@ -76,13 +88,54 @@ def _quickcheck_passed(runtime: ToolRuntime, bam: Path) -> bool:
 
 def _load_reference_names(fai: Path) -> list[str]:
     """Devuelve los nombres de contig declarados en un .fai."""
-    names: list[str] = []
+    return list(_load_reference_lengths(fai))
+
+
+def _load_reference_lengths(fai: Path) -> dict[str, int]:
+    """Nombre -> longitud de cada contig declarado en un .fai."""
+    out: dict[str, int] = {}
     with fai.open() as f:
         for line in f:
             if not line.strip():
                 continue
-            names.append(line.split("\t", 1)[0])
-    return names
+            cols = line.split("\t")
+            try:
+                out[cols[0]] = int(cols[1])
+            except (IndexError, ValueError):
+                out[cols[0]] = -1
+    return out
+
+
+def compare_reference(header: QCHeader, ref_lengths: dict[str, int]) -> tuple[list[str], list[str]]:
+    """Compara contigs del BAM con la referencia. Devuelve (issues, warnings).
+
+    - contig del BAM ausente en la referencia -> issue
+    - misma etiqueta con distinta longitud    -> issue (otra build, p.ej. hg19 vs hg38)
+    - contigs de la referencia no usados       -> warning (si son pocos)
+    """
+    issues: list[str] = []
+    warnings: list[str] = []
+    missing = [c for c in header.references if c not in ref_lengths]
+    if missing:
+        issues.append(
+            f"contigs del BAM ausentes en referencia: {missing[:5]}"
+            + (" ..." if len(missing) > 5 else "")
+        )
+    mism = [
+        f"{c} (BAM {header.reference_lengths[c]} vs ref {ref_lengths[c]})"
+        for c in header.references
+        if c in ref_lengths and c in header.reference_lengths
+        and ref_lengths[c] >= 0 and header.reference_lengths[c] != ref_lengths[c]
+    ]
+    if mism:
+        issues.append(
+            "longitud de contig distinta entre BAM y referencia "
+            f"(¿otra build?): {mism[:3]}" + (" ..." if len(mism) > 3 else "")
+        )
+    extra = [c for c in ref_lengths if c not in header.references]
+    if extra and len(extra) <= 5:
+        warnings.append(f"referencia tiene contigs no usados por el BAM: {extra}")
+    return issues, warnings
 
 
 def _flagstat(runtime: ToolRuntime, bam: Path) -> dict[str, object]:
@@ -169,16 +222,10 @@ def qc_bam(runtime: ToolRuntime, inp: QCBamInput) -> QCBamOutput:
         if not fai.exists():
             issues.append(f".fai de referencia no encontrado: {fai}")
         else:
-            ref_names = _load_reference_names(fai)
-            missing = [c for c in header.references if c not in ref_names]
-            extra = [c for c in ref_names if c not in header.references]
-            if missing:
-                issues.append(
-                    f"contigs del BAM ausentes en referencia: {missing[:5]}"
-                    + (" ..." if len(missing) > 5 else "")
-                )
-            if extra and len(extra) <= 5:
-                warnings.append(f"referencia tiene contigs no usados por el BAM: {extra}")
+            ref_issues, ref_warnings = compare_reference(
+                header, _load_reference_lengths(fai))
+            issues.extend(ref_issues)
+            warnings.extend(ref_warnings)
 
     # 5. muestra esperada
     if inp.expected_sample is not None:

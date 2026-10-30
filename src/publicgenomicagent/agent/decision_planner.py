@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
 from .planner import PlannedAction, RuleBasedPlanner
+from .qc_gate import QC_TOOLS, qc_gate
 from .state import AgentState
 
 SKIP = "SKIP"
@@ -188,9 +189,18 @@ class DecisionPlanner:
 
     def _candidates(self, state: AgentState) -> list[PlannedAction]:
         out: list[PlannedAction] = []
+        gate_open: bool | None = None
         for tool, _stage, _req in _STAGES:
             if tool in self._skipped:
                 continue
+            if tool not in QC_TOOLS:
+                if gate_open is None:
+                    gate = qc_gate(state)
+                    gate_open = gate.open
+                    if not gate_open and not out:
+                        state.note(f"decision_planner: puerta QC cerrada ({gate.reason()})")
+                if not gate_open:
+                    continue
             action = getattr(self.rules, _RULE_ATTR[tool])(state)
             if action is None:
                 continue

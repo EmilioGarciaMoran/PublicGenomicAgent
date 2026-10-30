@@ -47,6 +47,7 @@ class QCBamInput(BaseModel):
 class QCHeader(BaseModel):
     sort_order: str | None = None          # SO: coordinate | queryname | unknown
     references: list[str] = []             # @SQ SN
+    reference_lengths: dict[str, int] = {} # @SQ SN -> LN
     read_groups: list[str] = []            # @RG ID
     samples: list[str] = []                # @RG SM (únicos)
 

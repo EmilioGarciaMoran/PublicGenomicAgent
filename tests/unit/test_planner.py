@@ -132,7 +132,7 @@ def test_rule_based_skips_qc_if_already_done():
     state.record(
         tool_name="qc_bam",
         inp={"bam_path": "/tmp/p.bam", "level": "structural"},
-        out={"ok": True},
+        out={"ok": True, "passed": True},
         duration_ms=1,
     )
 
@@ -148,7 +148,7 @@ def test_rule_based_returns_none_when_everything_done():
     state.record(
         tool_name="qc_bam",
         inp={"bam_path": "/tmp/p.bam"},
-        out={"ok": True},
+        out={"ok": True, "passed": True},
         duration_ms=1,
     )
     state.record(
@@ -341,7 +341,7 @@ def test_rule_joint_call_after_all_sub_bams_exist(tmp_path: Path):
         state.record(
             tool_name="qc_bam",
             inp={"bam_path": f"/tmp/{sample[0]}.bam"},
-            out={"ok": True},
+            out={"ok": True, "passed": True},
             duration_ms=1,
         )
     # Saltamos fetch_roi registrándolos

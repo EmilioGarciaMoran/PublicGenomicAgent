@@ -31,6 +31,7 @@ from typing import Any, Callable
 from ..tools.base import CaseManifest, GenomicRange
 from .events import Event
 from .planner import Planner
+from .qc_gate import QC_TOOLS, qc_args, qc_gate
 from .state import AgentState, SessionContext
 
 
@@ -159,7 +160,7 @@ def _plan_qc(state: AgentState) -> tuple[str, dict[str, Any]] | None:
             c.input.get("bam_path") == str(bam) for c in state.calls_of("qc_bam")
         )
         if not already:
-            return ("qc_bam", {"bam_path": bam, "level": "structural"})
+            return ("qc_bam", qc_args(state, sample, bam))
     return None
 
 
@@ -413,6 +414,8 @@ class AgentLoop:
         if self.planner is not None:
             action = self.planner.next_action(ctx.state)
             if action is not None:
+                if not self._gate_allows(ctx, action.tool_name):
+                    return None
                 out = ctx.call_tool(action.tool_name, **action.args)
                 return StepResult(
                     step_name=f"planner:{action.tool_name}",
@@ -426,8 +429,23 @@ class AgentLoop:
             planned = step.plan(ctx.state)
             if planned is None:
                 continue
+            if not self._gate_allows(ctx, planned[0]):
+                return None
             return step.execute(ctx)
         return None
+
+    @staticmethod
+    def _gate_allows(ctx: SessionContext, tool_name: str) -> bool:
+        """Punto único de control: nada fuera de QC sin la puerta abierta."""
+        if tool_name in QC_TOOLS:
+            return True
+        gate = qc_gate(ctx.state)
+        if gate.open:
+            return True
+        ctx.state.note(
+            f"loop: puerta QC cerrada; '{tool_name}' no se ejecuta ({gate.reason()})"
+        )
+        return False
 
 
 # ---------------------------------------------------------------------------

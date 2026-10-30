@@ -31,10 +31,16 @@ def FakeState(tmp, trio=True, text=False, clinvar=True):
     return st
 
 
-def _run(st, a, ok=True):
-    """Simula la ejecución de una acción: registra la llamada y sus efectos."""
+def _run(st, a, ok=True, qc_passed=True):
+    """Simula la ejecución de una acción: registra la llamada y sus efectos.
+
+    qc_bam devuelve `passed` como la tool real (por defecto True).
+    """
     inp = {k: (v if isinstance(v, (list, dict)) else str(v)) for k, v in a.args.items()}
-    st.tool_calls.append(ToolCallRecord(tool_name=a.tool_name, input=inp, ok=ok))
+    out = None
+    if ok and a.tool_name == "qc_bam":
+        out = {"passed": qc_passed, "issues": [] if qc_passed else ["SM esperado 'P' no está en header ['X']"]}
+    st.tool_calls.append(ToolCallRecord(tool_name=a.tool_name, input=inp, ok=ok, output=out))
     if not ok:
         return
     (st.artifacts["roi_dir"]).mkdir(exist_ok=True)
