@@ -250,3 +250,28 @@ def test_cli_family_options(tmp_path):
     bad = tmp_path / "bad.ped"; bad.write_text("FAM P F M 1 2\nFAM F 0 0 2 1\nFAM M 0 0 2 1\n")
     with pytest.raises(typer.Exit):
         _apply_family_options(state(), str(bad), None, False)
+
+
+def test_cli_maps_role_named_bams_to_ped_ids(tmp_path):
+    import typer
+    from publicgenomicagent.agent.state import AgentState
+    from publicgenomicagent.cli.main import _apply_family_options
+    from publicgenomicagent.tools.base import CaseManifest
+
+    def state():
+        st = AgentState(case=CaseManifest(case_id="C", source="clinical", proband="proband",
+                                          phenotype_text={"proband": "osteopetrosis"}))
+        st.bams = {"father": tmp_path / "f.bam", "mother": tmp_path / "m.bam",
+                   "proband": tmp_path / "p.bam"}
+        return st
+
+    ped = tmp_path / "t.ped"; ped.write_text(TRIO)
+    st = state()
+    _apply_family_options(st, str(ped), None, False)
+    assert st.bams == {"F": tmp_path / "f.bam", "M": tmp_path / "m.bam", "P": tmp_path / "p.bam"}
+    assert st.case.proband == "P" and st.case.phenotype_text == {"P": "osteopetrosis"}
+    assert any("asignados al PED por rol" in n for n in st.notes)
+
+    orphan = tmp_path / "o.ped"; orphan.write_text("FAM P 0 0 1 2\n")
+    with pytest.raises(typer.Exit):                 # probando sin padres en el PED
+        _apply_family_options(state(), str(orphan), None, False)

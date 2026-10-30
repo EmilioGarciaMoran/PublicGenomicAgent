@@ -32,6 +32,33 @@ def _apply_family_options(state, ped, relatedness_sites, allow_unverified) -> No
         from publicgenomicagent.tools.pedigree import find_proband, load_ped, validate_pedigree
 
         fids, inds = load_ped(Path(ped))
+        ids = {i.sample for i in inds}
+        # Los comandos de trío guardan los BAM por rol (father/mother/proband);
+        # con un PED se asignan a sus IDs: probando declarado (o único afectado)
+        # y sus padres según el PED. Nunca se adivina por nombre.
+        roles = {"father", "mother", "proband"}
+        if set(state.bams) <= roles and not set(state.bams) & ids:
+            by = {i.sample: i for i in inds}
+            prob = state.case.proband if state.case.proband in ids else None
+            try:
+                prob = prob or find_proband(inds)
+            except ValueError as e:
+                console.print(f"[red]PED error:[/red] {e}")
+                raise typer.Exit(code=2)
+            target = {"proband": prob, "father": by[prob].father, "mother": by[prob].mother}
+            missing = [r for r in state.bams if target.get(r) is None]
+            if missing:
+                console.print(f"[red]PED error:[/red] el probando {prob} no tiene "
+                              f"{' ni '.join(missing)} declarado(s) en el PED")
+                raise typer.Exit(code=2)
+            mapping = {role: target[role] for role in state.bams}
+            state.bams = {mapping[r]: b for r, b in state.bams.items()}
+            state.case.proband = prob
+            if state.case.phenotype_text.get("proband") and prob not in state.case.phenotype_text:
+                state.case.phenotype_text[prob] = state.case.phenotype_text.pop("proband")
+            msg = ", ".join(f"{r}→{mapping[r]}" for r in sorted(mapping))
+            console.print(f"[dim]BAM asignados al PED por rol: {msg}[/dim]")
+            state.note(f"BAM asignados al PED por rol: {msg}")
         v = validate_pedigree(inds, fids, sequenced=set(state.bams))
         for w in v.warnings:
             console.print(f"[yellow]PED aviso:[/yellow] {w}")
