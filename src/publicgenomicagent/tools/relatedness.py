@@ -46,8 +46,9 @@ from __future__ import annotations
 
 import gzip
 import subprocess
+from functools import lru_cache
 from itertools import combinations
-from math import comb
+from math import exp, fsum, lgamma, log, log1p
 from pathlib import Path
 
 from ..env.micromamba import bin_path
@@ -168,14 +169,28 @@ def pair_stats(gi: list[int | None], gj: list[int | None], min_hets: int = 10) -
             "hets_a": hi, "hets_b": hj, "relatedness": rel}
 
 
+def _log_pmf(k: int, n: int, p: float) -> float:
+    return (lgamma(n + 1) - lgamma(k + 1) - lgamma(n - k + 1)
+            + k * log(p) + (n - k) * log1p(-p))
+
+
+@lru_cache(maxsize=65536)
 def binom_sf(x: int, n: int, p: float) -> float:
-    """P(X >= x) con X ~ Binomial(n, p)."""
+    """P(X >= x) con X ~ Binomial(n, p), estable para n y x grandes (escala log)."""
     if x <= 0:
         return 1.0
-    cdf = sum(comb(n, k) * p ** k * (1 - p) ** (n - k) for k in range(min(x, n + 1)))
-    return max(0.0, 1.0 - cdf)
+    if x > n:
+        return 0.0
+    if p <= 0.0:
+        return 0.0
+    if p >= 1.0:
+        return 1.0
+    if x > n * p:   # cola superior: sumar directamente k = x..n
+        return min(1.0, fsum(exp(_log_pmf(k, n, p)) for k in range(x, n + 1)))
+    return max(0.0, 1.0 - fsum(exp(_log_pmf(k, n, p)) for k in range(x)))
 
 
+@lru_cache(maxsize=4096)
 def ibs0_threshold(n: int, genotype_error: float, alpha: float) -> int:
     """Menor recuento de IBS0 improbable (< alpha) para un progenitor verdadero."""
     x = 0

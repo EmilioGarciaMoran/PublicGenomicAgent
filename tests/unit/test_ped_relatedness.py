@@ -321,3 +321,20 @@ def test_true_trio_with_real_like_error_does_not_fail_at_150_sites():
         status, *_ = run(TRIO, gts, ["F", "M", "P"])
         fails += status == "failed"
     assert fails == 0
+
+
+def test_binom_sf_exact_and_large_n_without_overflow():
+    from fractions import Fraction
+    from math import comb
+    from publicgenomicagent.tools.relatedness import binom_sf
+
+    def exact(k0, n, p):
+        p = Fraction(p).limit_denominator(10**6)
+        return float(sum(comb(n, k) * p**k * (1 - p)**(n - k) for k in range(k0, n + 1)))
+
+    for k0, n, p in [(5, 100, 0.005), (3, 150, 7 / 3459), (6, 200, 0.087), (40, 400, 0.1)]:
+        assert binom_sf(k0, n, p) == pytest.approx(exact(k0, n, p), rel=1e-9, abs=1e-15)
+    # caso real que desbordaba: padre falso con todos los sitios GIAB
+    assert binom_sf(408, 3417, 0.005) == 0.0 or binom_sf(408, 3417, 0.005) < 1e-300
+    assert binom_sf(6, 3417, 0.087) == pytest.approx(1.0)
+    assert binom_sf(0, 10, 0.5) == 1.0 and binom_sf(11, 10, 0.5) == 0.0
