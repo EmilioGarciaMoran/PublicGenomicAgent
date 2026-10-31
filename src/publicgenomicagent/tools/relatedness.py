@@ -14,19 +14,29 @@ reimplementadas aquí):
   relatedness  (shared_hets - 2*ibs0) / min(hets_i, hets_j)
                ~0 no emparentados, ~0.5 padre-hijo y hermanos, ~1 duplicado
 
-Comprobaciones (umbrales PROVISIONALES, pendientes de calibrar con
-datos reales y con familias simuladas):
-  - padre/madre-hijo declarado con ibs0/n > max_parent_ibs0 -> FALLO.
-    Es la prueba más robusta: un progenitor y su hijo no pueden ser
-    homocigotos opuestos, haya consanguinidad o no.
+Comprobaciones (calibradas con exomas GIAB, ver
+scripts/calibrate_relatedness_giab.py):
+  - padre/madre-hijo: prueba binomial sobre IBS0. Con un progenitor
+    verdadero, IBS0 solo aparece por error de genotipado (GIAB: 0.03% y
+    0.2% en las dos parejas reales); se toma genotype_error = 0.5%. El
+    umbral es el menor recuento con P(IBS0 >= umbral | progenitor) < alpha
+    (1e-3). IBS0 >= umbral -> FALLO. Es la prueba más robusta: un
+    progenitor y su hijo no pueden ser homocigotos opuestos, haya
+    consanguinidad o no.
+  - potencia: si con n sitios la probabilidad de detectar a un
+    no-progenitor DE LA MISMA POBLACIÓN (tasa de IBS0 de referencia 8.7%,
+    la del matrimonio askenazí HG003-HG004, población endogámica) es
+    < min_power (99.9%), la pareja es NO VERIFICABLE. En la práctica hacen
+    falta ~200 sitios informativos. La regla fija anterior (IBS0/n > 1%)
+    daba 1-4% de falsas alarmas con 100-150 sitios en el trío GIAB real.
   - relatedness >= dup_relatedness entre individuos distintos -> FALLO
     (duplicado o intercambio; el PED no expresa gemelos MZ).
-  - parentesco esperado >= 0.25 y observado < esperado - deficit_tol -> FALLO.
+  - parentesco esperado >= 0.25 (no padre/madre-hijo) y observado
+    < esperado - deficit_tol -> FALLO (p.ej. hermanos que no lo son).
   - esperado < 0.1 y observado > undeclared_relatedness -> AVISO
-    (parentesco no declarado; en poblaciones endogámicas el fondo es alto).
-  - n < min_sites -> pareja NO VERIFICABLE (no equivale a aprobada).
-    Con SNV comunes, un no-progenitor da IBS0 en ~7% de los sitios: con
-    100 sitios la probabilidad de no detectarlo es ~0.1%; con 30, ~10%.
+    (parentesco no declarado; fondo askenazí observado: 0.08).
+  - relatedness solo se estima con >= min_hets heterocigotos (ruido).
+  - n < min_sites -> NO VERIFICABLE (suelo absoluto; no equivale a aprobada).
     Los sitios deben ser comunes (MAF alta): con MAF baja IBS0 es raro.
 
 Una incoherencia se describe como incompatibilidad con el pedigrí
@@ -37,6 +47,7 @@ from __future__ import annotations
 import gzip
 import subprocess
 from itertools import combinations
+from math import comb
 from pathlib import Path
 
 from ..env.micromamba import bin_path
@@ -157,14 +168,33 @@ def pair_stats(gi: list[int | None], gj: list[int | None], min_hets: int = 10) -
             "hets_a": hi, "hets_b": hj, "relatedness": rel}
 
 
+def binom_sf(x: int, n: int, p: float) -> float:
+    """P(X >= x) con X ~ Binomial(n, p)."""
+    if x <= 0:
+        return 1.0
+    cdf = sum(comb(n, k) * p ** k * (1 - p) ** (n - k) for k in range(min(x, n + 1)))
+    return max(0.0, 1.0 - cdf)
+
+
+def ibs0_threshold(n: int, genotype_error: float, alpha: float) -> int:
+    """Menor recuento de IBS0 improbable (< alpha) para un progenitor verdadero."""
+    x = 0
+    while binom_sf(x, n, genotype_error) >= alpha:
+        x += 1
+    return x
+
+
 def evaluate(
     pedigree: list[IndividualSpec],
     genotypes: dict[tuple[str, int], dict[str, int | None]],
     samples: list[str],
     *,
     min_sites: int = 100,
-    min_hets: int = 10,
-    max_parent_ibs0: float = 0.01,
+    min_hets: int = 50,
+    genotype_error: float = 0.005,
+    alpha: float = 1e-3,
+    nonparent_ibs0_rate: float = 0.087,
+    min_power: float = 0.999,
     dup_relatedness: float = 0.85,
     deficit_tol: float = 0.2,
     undeclared_relatedness: float = 0.3,
@@ -186,21 +216,36 @@ def evaluate(
         r = st["relatedness"]
         status = "passed"
         notes: list[str] = []
+        po = rel_label == "padre/madre-hijo"
+        test: dict = {}
         if st["n"] < min_sites:
             status = "not_verifiable"
             notes.append(f"solo {st['n']} sitios informativos (< {min_sites})")
-            if rel_label == "padre/madre-hijo":
+            if po:
                 po_unverifiable = True
         else:
-            if rel_label == "padre/madre-hijo" and st["ibs0"] / st["n"] > max_parent_ibs0:
-                status = "failed"
-                notes.append(
-                    f"incompatible con padre/madre-hijo declarado: IBS0 "
-                    f"{st['ibs0']}/{st['n']} homocigotos opuestos")
+            if po:
+                thr = ibs0_threshold(st["n"], genotype_error, alpha)
+                power = binom_sf(thr, st["n"], nonparent_ibs0_rate)
+                p_val = binom_sf(st["ibs0"], st["n"], genotype_error)
+                test = {"ibs0_threshold": thr, "p_value": p_val, "power": round(power, 6)}
+                if st["ibs0"] >= thr:
+                    status = "failed"
+                    notes.append(
+                        f"incompatible con padre/madre-hijo declarado: IBS0 "
+                        f"{st['ibs0']}/{st['n']} homocigotos opuestos (umbral {thr}, "
+                        f"p={p_val:.1e} si fuera progenitor)")
+                elif power < min_power:
+                    status = "not_verifiable"
+                    po_unverifiable = True
+                    notes.append(
+                        f"potencia insuficiente: con {st['n']} sitios se detectaría a un "
+                        f"no-progenitor de la misma población con probabilidad "
+                        f"{power:.3f} (< {min_power})")
             if r is not None and r >= dup_relatedness:
                 status = "failed"
                 notes.append(f"relatedness {r:.2f}: posible duplicado o intercambio de muestras")
-            if r is not None and exp >= 0.25 and r < exp - deficit_tol:
+            if r is not None and not po and exp >= 0.25 and r < exp - deficit_tol:
                 status = "failed"
                 notes.append(
                     f"parentesco observado {r:.2f} menor que el declarado "
@@ -209,11 +254,11 @@ def evaluate(
                     and status != "failed"):
                 status = "warning"
                 notes.append(f"parentesco no declarado: observado {r:.2f}, esperado {exp:.2f}")
-            if r is None and status == "passed" and rel_label != "padre/madre-hijo":
+            if r is None and status == "passed" and not po and exp >= 0.1:
                 status = "not_verifiable"
                 notes.append(f"pocos heterocigotos para estimar relatedness (< {min_hets})")
         pairs.append({"a": a, "b": b, "declared": rel_label,
-                      "expected_relatedness": round(exp, 4), **st,
+                      "expected_relatedness": round(exp, 4), **st, **test,
                       "status": status, "notes": notes})
         for n_ in notes:
             (issues if status == "failed" else warnings).append(f"{a}–{b}: {n_}")
@@ -224,7 +269,9 @@ def evaluate(
         overall = "not_verifiable"
         if not pairs:
             warnings.append("menos de dos individuos secuenciados del PED: nada que comparar")
-    elif any(p["status"] in ("warning", "not_verifiable") for p in pairs):
+    elif any(p["status"] == "warning" for p in pairs) or any(
+            p["status"] == "not_verifiable" and p["expected_relatedness"] >= 0.1 for p in pairs):
+        # Una pareja no emparentada que no se puede comprobar no aporta aviso.
         overall = "warning"
     else:
         overall = "passed"
@@ -271,7 +318,9 @@ def verify_relatedness(runtime: ToolRuntime, inp: VerifyRelatednessInput) -> Ver
     status, pairs, issues, warnings = evaluate(
         inp.pedigree, gts, samples,
         min_sites=inp.min_sites, min_hets=inp.min_hets,
-        max_parent_ibs0=inp.max_parent_ibs0, dup_relatedness=inp.dup_relatedness,
+        genotype_error=inp.genotype_error, alpha=inp.alpha,
+        nonparent_ibs0_rate=inp.nonparent_ibs0_rate, min_power=inp.min_power,
+        dup_relatedness=inp.dup_relatedness,
         deficit_tol=inp.deficit_tol, undeclared_relatedness=inp.undeclared_relatedness,
     )
     return VerifyRelatednessOutput(

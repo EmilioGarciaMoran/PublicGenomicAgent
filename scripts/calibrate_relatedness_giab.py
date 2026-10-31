@@ -364,8 +364,9 @@ def main(argv: list[str] | None = None) -> dict:
         "cromosomas": ",".join(regions),
         "panel": f"{len(sites)} SNV de 1000G fase 3, AF en [{a.af_min}, {a.af_max}], "
                  f"en regiones >= {a.min_depth}x de HG002",
-        "umbrales": "por defecto de verify_relatedness (min_dp 7, min_sites 100, "
-                    "max_parent_ibs0 0.01, dup 0.85, deficit_tol 0.2, undeclared 0.3)",
+        "umbrales": "por defecto de verify_relatedness (min_dp 7, min_sites 100, min_hets 50, "
+                    "prueba binomial IBS0 con error 0.005 y alfa 1e-3, potencia 0.999 frente "
+                    "a IBS0 0.087, dup 0.85, deficit_tol 0.2, undeclared 0.3)",
         "repeticiones": f"{a.reps} por tamaño de panel, semilla {a.seed}",
         "samtools": tool_version(samtools),
         "bcftools": tool_version(bcftools),

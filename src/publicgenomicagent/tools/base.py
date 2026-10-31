@@ -296,8 +296,11 @@ class VerifyRelatednessInput(BaseModel):
     output_dir: Path
     min_dp: int = 7
     min_sites: int = 100                 # P(no ver IBS0 de un padre falso) ~ e^(-0.07 n)
-    min_hets: int = 10
-    max_parent_ibs0: float = 0.01
+    min_hets: int = 50                   # heterocigotos mínimos para estimar relatedness
+    genotype_error: float = 0.005        # GIAB: IBS0 en progenitores reales 0.03%-0.2%
+    alpha: float = 1e-3                  # P máx. de falsa alarma por pareja padre/madre-hijo
+    nonparent_ibs0_rate: float = 0.087   # IBS0 de no emparentados de la misma población (GIAB AJ)
+    min_power: float = 0.999             # potencia mínima para dar una pareja por verificada
     dup_relatedness: float = 0.85
     deficit_tol: float = 0.2
     undeclared_relatedness: float = 0.3

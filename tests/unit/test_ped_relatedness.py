@@ -288,13 +288,36 @@ def test_calibration_rates_and_report():
     samples = ["F", "M", "P", "X"]
     true_sc = Scenario("verdadero", parse_ped_text(TRIO)[1], "passed")
     false_sc = Scenario("padre falso", parse_ped_text("FAM X 0 0 1 1\nFAM M 0 0 2 1\nFAM P X M 1 2\n")[1], "failed")
-    cal = calibrate(gts, samples, [true_sc, false_sc], ks=[50, 150, 2000], reps=60, seed=2)
+    cal = calibrate(gts, samples, [true_sc, false_sc], ks=[50, 150, 300, 2000], reps=60, seed=2)
     t = {r["k"]: r for r in cal["scenarios"]["verdadero"]["by_panel_size"]}
     f = {r["k"]: r for r in cal["scenarios"]["padre falso"]["by_panel_size"]}
     assert t[50]["not_verifiable_rate"] == 1.0            # por debajo de min_sites
-    assert t[150]["failed_rate"] == 0.0 and f[150]["correct_rate"] == 1.0
+    assert t[150]["failed_rate"] == 0.0 and t[300]["failed_rate"] == 0.0
+    # un padre falso nunca se da por bueno: o falla o, sin potencia, no es verificable
+    assert f[150]["counts"].get("passed", 0) == 0 and f[150]["counts"].get("warning", 0) == 0
+    assert f[300]["correct_rate"] == 1.0
     assert "skipped" in t[2000]                           # más sitios de los que hay
     pairs = {(p["a"], p["b"]): p for p in pairwise_summary(gts, samples)}
     assert pairs[("F", "P")]["ibs0"] == 0 and pairs[("P", "X")]["ibs0"] > 0
     md = markdown_report(cal, list(pairs.values()), {"datos": "simulados"})
     assert "| 150 |" in md and "padre falso" in md
+
+
+def test_binomial_ibs0_rule_numbers():
+    from publicgenomicagent.tools.relatedness import binom_sf, ibs0_threshold
+    # con error 0.5% y alfa 1e-3 (valores por defecto)
+    assert [ibs0_threshold(n, 0.005, 1e-3) for n in (100, 150, 200, 500)] == [5, 6, 6, 10]
+    assert binom_sf(6, 200, 0.087) > 0.999                 # potencia con 200 sitios
+    assert binom_sf(6, 150, 0.087) < 0.999                 # con 150 aún no basta
+    assert binom_sf(2, 150, 7 / 3459) > 0.03               # regla fija antigua: ~4% de falsas alarmas
+
+
+def test_true_trio_with_real_like_error_does_not_fail_at_150_sites():
+    """Regresión de la calibración GIAB: 4.4% de falsos fallos con 150 sitios."""
+    _, inds = parse_ped_text(TRIO)
+    fails = 0
+    for seed in range(200):
+        gts = simulate(inds, n_sites=150, seed=seed, error=0.002, af=(0.2, 0.8))
+        status, *_ = run(TRIO, gts, ["F", "M", "P"])
+        fails += status == "failed"
+    assert fails == 0
