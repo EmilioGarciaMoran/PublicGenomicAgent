@@ -15,7 +15,8 @@ Pasos (cada uno se salta si su salida ya existe en --workdir):
   3. sub-BAM por muestra de esos cromosomas, SM reetiquetado al ID GIAB;
   4. regiones cubiertas en HG002 (profundidad >= --min-depth);
   5. panel: SNV bialélicos de 1000G con AF en [--af-min, --af-max] dentro
-     de las regiones cubiertas;
+     de las regiones cubiertas (VCF de 1000G descargado una vez, con
+     reintentos y reanudación, y filtrado en local);
   6. `verify_relatedness` real sobre las cuatro muestras;
   7. submuestreo de paneles de --ks sitios (--reps repeticiones) en dos
      escenarios: trío verdadero (debe pasar) y HG005 declarado padre de
@@ -97,19 +98,43 @@ def run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
     return subprocess.run([str(c) for c in cmd], check=True, **kw)
 
 
-def fetch(src: str, dest: Path) -> Path:
-    """Descarga (http/https/ftp) o copia (ruta local) `src` a `dest`."""
+def fetch(src: str, dest: Path, retries: int = 5, check=None) -> Path:
+    """Descarga (http/https/ftp) o copia (ruta local) `src` a `dest`.
+
+    Robusto frente a cortes: reintenta y, en HTTP, retoma desde lo ya
+    descargado (cabecera Range) en `dest.part`. `check(path)` valida el
+    fichero completo (p.ej. integridad BGZF); si falla se borra y reintenta.
+    """
     if dest.exists():
         return dest
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".part")
-    if re.match(r"^(https?|ftp)://", src):
-        with urllib.request.urlopen(src, timeout=300) as r, tmp.open("wb") as f:
-            shutil.copyfileobj(r, f)
-    else:
+    if not re.match(r"^(https?|ftp)://", src):
         shutil.copyfile(src, tmp)
-    tmp.rename(dest)
-    return dest
+        tmp.rename(dest)
+        return dest
+    last: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            have = tmp.stat().st_size if tmp.exists() else 0
+            req = urllib.request.Request(src, headers={"Range": f"bytes={have}-"} if have else {})
+            with urllib.request.urlopen(req, timeout=300) as r:
+                resumed = have and getattr(r, "status", 200) == 206
+                with tmp.open("ab" if resumed else "wb") as f:
+                    shutil.copyfileobj(r, f, length=1 << 20)
+                total = r.headers.get("Content-Range", "").rsplit("/", 1)[-1] if resumed \
+                    else r.headers.get("Content-Length")
+            if total and total.isdigit() and tmp.stat().st_size != int(total):
+                raise OSError(f"descarga incompleta: {tmp.stat().st_size}/{total} bytes")
+            if check is not None and not check(tmp):
+                tmp.unlink()
+                raise OSError("el fichero descargado no supera la comprobación de integridad")
+            tmp.rename(dest)
+            return dest
+        except Exception as e:  # noqa: BLE001
+            last = e
+            log(f"   descarga de {Path(src).name}: intento {attempt}/{retries} falló ({e}); reintento")
+    raise SystemExit(f"no se pudo descargar {src}: {last}")
 
 
 def bam_header(samtools: str, src: dict) -> dict:
@@ -234,10 +259,15 @@ def build_sites(work: Path, chroms: list[str], prefix: bool, covered: Path, base
     seen, rows = set(), []
     for c in chroms:
         url = onekg_vcf(base, c)
-        log(f"1000G chr{c}: {url.rsplit('/', 1)[-1]}")
+        name = url.rsplit("/", 1)[-1]
+        log(f"1000G chr{c}: {name} (descarga local una vez; ~200 MB)")
+        # Se descarga entero: consultar en remoto miles de regiones pequeñas
+        # obliga a miles de saltos HTTP y un solo corte rompe la lectura.
+        local = fetch(url, work / "onekg" / name, check=lambda p: bgzip_ok(p, bcftools))
+        fetch(url + ".tbi", work / "onekg" / (name + ".tbi"))
         view = subprocess.Popen(
             [bcftools, "view", "-R", str(regions_1kg), "-G", "-v", "snps", "-m2", "-M2",
-             "-i", f"INFO/AF>={af_min} && INFO/AF<={af_max}", "-Ou", url],
+             "-i", f"INFO/AF>={af_min} && INFO/AF<={af_max}", "-Ou", str(local)],
             stdout=subprocess.PIPE)
         q = subprocess.run([bcftools, "query", "-f", "%CHROM\t%POS\t%REF\t%ALT\n"],
                            stdin=view.stdout, capture_output=True, text=True, check=True)
@@ -252,6 +282,12 @@ def build_sites(work: Path, chroms: list[str], prefix: bool, covered: Path, base
     sites.write_text("".join(rows))
     log(f"panel de sitios: {len(rows)} SNV comunes en regiones cubiertas")
     return sites
+
+
+def bgzip_ok(path: Path, bcftools: str) -> bool:
+    """Integridad BGZF completa (bgzip -t, del mismo entorno que bcftools)."""
+    bgzip = str(Path(bcftools).with_name("bgzip"))
+    return subprocess.run([bgzip, "-t", str(path)], capture_output=True).returncode == 0
 
 
 def tool_version(binary: str) -> str:
