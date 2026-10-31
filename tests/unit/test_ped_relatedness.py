@@ -275,3 +275,26 @@ def test_cli_maps_role_named_bams_to_ped_ids(tmp_path):
     orphan = tmp_path / "o.ped"; orphan.write_text("FAM P 0 0 1 2\n")
     with pytest.raises(typer.Exit):                 # probando sin padres en el PED
         _apply_family_options(state(), str(orphan), None, False)
+
+
+# --- calibración por submuestreo ----------------------------------------
+
+def test_calibration_rates_and_report():
+    from publicgenomicagent.tools.relatedness_calibration import (
+        Scenario, calibrate, markdown_report, pairwise_summary)
+    fam = TRIO + "FAM X 0 0 1 1\n"
+    _, inds = parse_ped_text(fam)
+    gts = simulate(inds, n_sites=600, seed=4)
+    samples = ["F", "M", "P", "X"]
+    true_sc = Scenario("verdadero", parse_ped_text(TRIO)[1], "passed")
+    false_sc = Scenario("padre falso", parse_ped_text("FAM X 0 0 1 1\nFAM M 0 0 2 1\nFAM P X M 1 2\n")[1], "failed")
+    cal = calibrate(gts, samples, [true_sc, false_sc], ks=[50, 150, 2000], reps=60, seed=2)
+    t = {r["k"]: r for r in cal["scenarios"]["verdadero"]["by_panel_size"]}
+    f = {r["k"]: r for r in cal["scenarios"]["padre falso"]["by_panel_size"]}
+    assert t[50]["not_verifiable_rate"] == 1.0            # por debajo de min_sites
+    assert t[150]["failed_rate"] == 0.0 and f[150]["correct_rate"] == 1.0
+    assert "skipped" in t[2000]                           # más sitios de los que hay
+    pairs = {(p["a"], p["b"]): p for p in pairwise_summary(gts, samples)}
+    assert pairs[("F", "P")]["ibs0"] == 0 and pairs[("P", "X")]["ibs0"] > 0
+    md = markdown_report(cal, list(pairs.values()), {"datos": "simulados"})
+    assert "| 150 |" in md and "padre falso" in md
