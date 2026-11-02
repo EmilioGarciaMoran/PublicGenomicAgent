@@ -32,7 +32,11 @@ scripts/calibrate_relatedness_giab.py):
   - relatedness >= dup_relatedness entre individuos distintos -> FALLO
     (duplicado o intercambio; el PED no expresa gemelos MZ).
   - parentesco esperado >= 0.25 (no padre/madre-hijo) y observado
-    < esperado - deficit_tol -> FALLO (p.ej. hermanos que no lo son).
+    < esperado - deficit_tol -> AVISO, no fallo: entre hermanos el
+    parentesco realizado varía mucho cuando los sitios cubren pocas
+    regiones (pocos sobrecruzamientos). No se evalúa si ambos individuos
+    tienen a sus dos padres secuenciados: la prueba padre/madre-hijo ya lo
+    cubre y es más robusta.
   - esperado < 0.1 y observado > undeclared_relatedness -> AVISO
     (parentesco no declarado; fondo askenazí observado: 0.08).
   - relatedness solo se estima con >= min_hets heterocigotos (ruido).
@@ -223,6 +227,13 @@ def evaluate(
     warnings: list[str] = []
     pairs: list[dict] = []
     po_unverifiable = False
+    by = {i.sample: i for i in pedigree}
+    seq_set = set(seq)
+
+    def parents_sequenced(x: str) -> bool:
+        i = by.get(x)
+        return bool(i and i.father in seq_set and i.mother in seq_set)
+
     for a, b in combinations(seq, 2):
         st = pair_stats([genotypes[k].get(a) for k in keys],
                         [genotypes[k].get(b) for k in keys], min_hets)
@@ -260,11 +271,14 @@ def evaluate(
             if r is not None and r >= dup_relatedness:
                 status = "failed"
                 notes.append(f"relatedness {r:.2f}: posible duplicado o intercambio de muestras")
-            if r is not None and not po and exp >= 0.25 and r < exp - deficit_tol:
-                status = "failed"
+            if (r is not None and not po and exp >= 0.25 and r < exp - deficit_tol
+                    and not (parents_sequenced(a) and parents_sequenced(b))
+                    and status != "failed"):
+                status = "warning"
                 notes.append(
                     f"parentesco observado {r:.2f} menor que el declarado "
-                    f"({rel_label}, esperado {exp:.2f})")
+                    f"({rel_label}, esperado {exp:.2f}); revisar: entre hermanos el "
+                    f"parentesco real varía mucho si los sitios cubren pocas regiones")
             if (r is not None and exp < 0.1 and r > undeclared_relatedness
                     and status != "failed"):
                 status = "warning"

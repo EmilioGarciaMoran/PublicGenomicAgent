@@ -68,7 +68,11 @@ def _apply_family_options(state, ped, relatedness_sites, allow_unverified) -> No
             raise typer.Exit(code=2)
         state.case.pedigree = inds
         if state.case.proband not in {i.sample for i in inds}:
-            state.case.proband = find_proband(inds)
+            try:
+                state.case.proband = find_proband(inds)
+            except ValueError as e:
+                console.print(f"[red]PED error:[/red] {e}")
+                raise typer.Exit(code=2)
         state.note(f"pedigrí desde PED confirmado: {Path(ped).name} "
                    f"({len(inds)} individuos; avisos: {len(v.warnings)})")
     if relatedness_sites:
@@ -840,6 +844,122 @@ def run_trio(
     for n in state.notes:
         console.print(f"  - {n}")
 
+    out_json = Path("results") / f"{case_id}.session.json"
+    state.to_json(out_json)
+    console.print(f"\n[green]Estado guardado:[/green] {out_json}")
+
+
+@app.command("run-family")
+def run_family(
+    ped: str = typer.Option(..., "--ped", help="PED confirmado de la familia (FID IID PID MID SEX PHENO)"),
+    bam: list[str] = typer.Option(
+        ..., "--bam",
+        help="BAM de un individuo del PED como ID=ruta. Repetible: --bam P1=p1.bam --bam P2=p2.bam",
+    ),
+    reference: str = typer.Option(..., "--reference", "-f", help="FASTA de referencia"),
+    region: str = typer.Option(..., "--region", "-r", help="chr:start-end"),
+    proband: str = typer.Option(None, "--proband", help="ID del probando (por defecto: único afectado)"),
+    case_id: str = typer.Option("family", "--case-id"),
+    label: str = typer.Option("", "--label", help="Etiqueta del ROI (p.ej. gen)"),
+    max_steps: int = typer.Option(80, "--max-steps"),
+    planner_kind: str = typer.Option(
+        "decision", "--planner", "-p", help="rule | decision (por defecto) | llm (legacy)",
+    ),
+    clinvar: str = typer.Option(None, "--clinvar", help="VCF de ClinVar (opcional)"),
+    relatedness_sites: str = typer.Option(
+        None, "--relatedness-sites",
+        help="Panel de SNV comunes: activa la verificación familiar en la puerta de QC.",
+    ),
+    allow_unverified_relatedness: bool = typer.Option(
+        False, "--allow-unverified-relatedness",
+        help="Decisión humana registrada: continuar si la verificación familiar es 'no verificable'.",
+    ),
+) -> None:
+    """Analiza una familia de cualquier tamaño a partir de un PED y un BAM por individuo.
+
+    El PED puede incluir individuos sin BAM (p.ej. los abuelos que cierran un
+    bucle de consanguinidad): cuentan para el parentesco y la segregación.
+    """
+    from publicgenomicagent.agent.loop import AgentLoop
+    from publicgenomicagent.agent.planner import RuleBasedPlanner
+    from publicgenomicagent.agent.state import AgentState, SessionContext
+    from publicgenomicagent.tools.base import CaseManifest, GenomicRange
+
+    bams: dict[str, Path] = {}
+    for item in bam:
+        sid, sep, path = item.partition("=")
+        if not sep or not sid or not path:
+            console.print(f"[red]--bam debe ser ID=ruta, no '{item}'[/red]")
+            raise typer.Exit(code=2)
+        bp = Path(path).expanduser().resolve()
+        if not bp.exists():
+            console.print(f"[red]BAM no existe:[/red] {bp}")
+            raise typer.Exit(code=2)
+        if sid in bams:
+            console.print(f"[red]BAM duplicado para {sid}[/red]")
+            raise typer.Exit(code=2)
+        bams[sid] = bp
+
+    chrom, _, coords = region.partition(":")
+    start_s, _, end_s = coords.partition("-")
+    roi = GenomicRange(chrom=chrom, start=int(start_s), end=int(end_s), label=label)
+    case = CaseManifest(case_id=case_id, source="clinical", candidate_rois=[roi], proband=proband)
+    state = AgentState(case=case)
+    state.bams = bams
+    state.references["hg38"] = Path(reference).expanduser().resolve()
+    if clinvar:
+        cv = Path(clinvar).expanduser().resolve()
+        if not cv.exists():
+            console.print(f"[red]ClinVar no existe:[/red] {cv}")
+            raise typer.Exit(code=2)
+        state.references["clinvar"] = cv
+
+    if proband and proband not in bams:
+        console.print(f"[red]El probando {proband} no tiene BAM (--bam {proband}=...)[/red]")
+        raise typer.Exit(code=2)
+    _apply_family_options(state, ped, relatedness_sites, allow_unverified_relatedness)
+    if state.case.proband not in bams:
+        console.print(f"[red]El probando {state.case.proband} no tiene BAM[/red]")
+        raise typer.Exit(code=2)
+
+    if planner_kind == "rule":
+        planner = RuleBasedPlanner()
+    elif planner_kind == "decision":
+        from publicgenomicagent.agent.config import load_config
+        from publicgenomicagent.agent.decision_planner import DecisionPlanner, build_chooser
+
+        planner = DecisionPlanner(chooser=build_chooser(load_config().llm))
+    elif planner_kind == "llm":
+        from publicgenomicagent.agent.config import load_config
+        from publicgenomicagent.agent.llm_factory import build_llm_client
+        from publicgenomicagent.agent.planner import RuleFirstLLMPlanner
+
+        cfg = load_config().llm
+        planner = RuleFirstLLMPlanner(client=build_llm_client(cfg), rule=RuleBasedPlanner(),
+                                      include_paths=cfg.include_paths)
+    else:
+        console.print("[red]--planner debe ser rule, decision o llm[/red]")
+        raise typer.Exit(code=2)
+
+    seq = [i.sample for i in state.case.pedigree if i.sample in bams]
+    unseq = [i.sample for i in state.case.pedigree if i.sample not in bams]
+    console.print(f"[bold]Familia {case_id}[/bold]: probando {state.case.proband}; "
+                  f"secuenciados {seq}; sin BAM {unseq or '—'}")
+
+    ctx = SessionContext(state=state, runtime=_runtime())
+    results = AgentLoop(max_steps=max_steps, planner=planner).run(ctx)
+    console.print(f"[bold]Loop terminado:[/bold] {len(results)} iteraciones")
+    for r in results:
+        if r.executed:
+            console.print(f"  [green]✓[/green] {r.step_name} → {r.tool_name}")
+        else:
+            console.print(f"  [yellow]·[/yellow] {r.step_name}: {r.skipped_reason}")
+    mf = state.latest("mendelian_filter")
+    if mf:
+        console.print(f"[bold]Segregación:[/bold] {mf.get('message', '')}")
+    console.print("\n[bold]Notas:[/bold]")
+    for n in state.notes:
+        console.print(f"  - {n}")
     out_json = Path("results") / f"{case_id}.session.json"
     state.to_json(out_json)
     console.print(f"\n[green]Estado guardado:[/green] {out_json}")

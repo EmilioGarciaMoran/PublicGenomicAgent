@@ -1,5 +1,7 @@
 """BAMs sintéticos de una familia para probar la verificación familiar.
 
+Los haplotipos se transmiten con recombinación (ver `gamete`).
+
 Genera una referencia aleatoria, un panel de SNV comunes y, por cada
 individuo, un BAM con lecturas a profundidad fija cuyos alelos siguen
 haplotipos transmitidos de forma mendeliana. Permite "intercambiar" un
@@ -22,6 +24,7 @@ def make_family(
     depth: int = 25,
     seed: int = 11,
     bam_as: dict[str, str] | None = None,
+    recomb: float = 0.02,
 ) -> dict:
     """parents: sample -> (padre, madre). bam_as: sample -> individuo cuyas lecturas lleva.
 
@@ -51,8 +54,23 @@ def make_family(
             if f is None:
                 haps[s] = [[int(rng.random() < af) for *_, af in sites] for _ in range(2)]
             else:
-                haps[s] = [get(f)[rng.randrange(2)], get(m)[rng.randrange(2)]]
+                haps[s] = [gamete(get(f)), gamete(get(m))]
         return haps[s]
+
+    def gamete(parent: list[list[int]]) -> list[int]:
+        """Haplotipo transmitido con recombinación (prob. `recomb` de cambio por sitio).
+
+        Sin recombinación, dos hermanos podrían heredar haplotipos opuestos en
+        todos los sitios y parecer no emparentados, algo imposible en una
+        familia real a escala del genoma.
+        """
+        h = rng.randrange(2)
+        out = []
+        for k in range(len(sites)):
+            if k and rng.random() < recomb:
+                h = 1 - h
+            out.append(parent[h][k])
+        return out
 
     bams: dict[str, Path] = {}
     for sample in parents:

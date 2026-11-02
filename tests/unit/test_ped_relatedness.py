@@ -162,14 +162,15 @@ def test_consanguineous_family_has_no_false_failures():
     assert sib["expected_relatedness"] == pytest.approx(0.5625)
 
 
-def test_declared_siblings_who_are_not_fail():
+def test_declared_siblings_who_are_not_warn_without_parents():
     ped = TRIO + "FAM P2 F M 2 2\n"
     _, inds = parse_ped_text(ped + "FAM U 0 0 2 1\n")
     gts = simulate(inds)
     for row in gts.values():
         row["P2"] = row.pop("U")
-    status, _, issues, _ = run(ped, gts, ["P", "P2"])
-    assert status == "failed" and any("menor que el declarado" in i for i in issues)
+    status, _, issues, warnings = run(ped, gts, ["P", "P2"])          # solo hermanos, sin padres
+    assert status == "warning" and not issues
+    assert any("menor que el declarado" in w for w in warnings)
 
 
 def test_undeclared_relationship_is_a_warning():
@@ -338,3 +339,16 @@ def test_binom_sf_exact_and_large_n_without_overflow():
     assert binom_sf(408, 3417, 0.005) == 0.0 or binom_sf(408, 3417, 0.005) < 1e-300
     assert binom_sf(6, 3417, 0.087) == pytest.approx(1.0)
     assert binom_sf(0, 10, 0.5) == 1.0 and binom_sf(11, 10, 0.5) == 0.0
+
+
+def test_sibling_deficit_not_evaluated_when_parents_verify_it():
+    """Con ambos padres secuenciados, la prueba padre/madre-hijo cubre a los hermanos."""
+    ped = TRIO + "FAM P2 F M 2 2\n"
+    _, inds = parse_ped_text(ped)
+    gts = simulate(inds)
+    rng = random.Random(9)
+    for row in gts.values():                       # parentesco realizado entre hermanos alterado
+        row["P2"] = row["P"] if rng.random() < 0.3 else row["P2"]
+    status, pairs, issues, warnings = run(ped, gts, ["F", "M", "P", "P2"])
+    sib = next(p for p in pairs if {p["a"], p["b"]} == {"P", "P2"})
+    assert not any("menor que el declarado" in n for n in sib["notes"])

@@ -62,8 +62,14 @@ class Planner(Protocol):
 # ---------------------------------------------------------------------------
 
 def _samples_in_case(state: AgentState) -> list[str]:
+    """Muestras secuenciadas del caso, en el orden del PED.
+
+    El PED puede incluir individuos sin BAM (abuelos que cierran un bucle de
+    consanguinidad, fallecidos): cuentan para el parentesco y la segregación,
+    pero no para las tools que leen BAMs.
+    """
     if state.case.pedigree:
-        return [ind.sample for ind in state.case.pedigree]
+        return [ind.sample for ind in state.case.pedigree if ind.sample in state.bams]
     return list(state.bams.keys())
 
 

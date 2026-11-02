@@ -230,6 +230,72 @@ def _filter_auto_rec_hom(
     return matches, len(matches)
 
 
+def family_roles(
+    pedigree: list[IndividualSpec], samples: list[str], proband: str,
+) -> dict[str, list[str]]:
+    """Papeles de cada individuo secuenciado para el modelo recesivo.
+
+    - affected: el probando (siempre) y los demás afectados del PED con BAM.
+    - carriers: padres secuenciados y no afectados de algún afectado
+      (portadores obligados: 0/1).
+    - carriers_any: padres secuenciados de fenotipo desconocido (0/1 o 1/1).
+    - unaffected: el resto de no afectados secuenciados (no pueden ser 1/1).
+    Los individuos de fenotipo desconocido que no son padres no restringen.
+    """
+    seq = set(samples)
+    by = {i.sample: i for i in pedigree}
+    affected = [proband] + [i.sample for i in pedigree
+                            if i.affected and i.phenotype_known and i.sample in seq
+                            and i.sample != proband]
+    carriers: list[str] = []
+    carriers_any: list[str] = []
+    for a in affected:
+        ind = by.get(a)
+        for par in ((ind.father, ind.mother) if ind else ()):
+            if not par or par not in seq or par in affected:
+                continue
+            pi = by.get(par)
+            target = carriers if (pi is None or pi.phenotype_known) else carriers_any
+            if par not in carriers and par not in carriers_any:
+                target.append(par)
+    unaffected = [i.sample for i in pedigree
+                  if i.phenotype_known and not i.affected and i.sample in seq
+                  and i.sample not in carriers and i.sample != proband]
+    return {"affected": affected, "carriers": carriers,
+            "carriers_any": carriers_any, "unaffected": unaffected}
+
+
+def _filter_auto_rec_family(
+    vcf_lines: list[str], samples: list[str], roles: dict[str, list[str]],
+    min_dp: int, min_qual: int,
+) -> tuple[list[str], int]:
+    """Recesivo homocigoto en una familia de cualquier tamaño.
+
+    Todos los afectados 1/1 (con QUAL y DP suficientes), los portadores
+    obligados 0/1 y ningún no afectado secuenciado 1/1. En un trío es
+    exactamente la regla clásica (padre 0/1, madre 0/1, hijo 1/1).
+    """
+    matches: list[str] = []
+    for line in vcf_lines:
+        if line.startswith("#"):
+            continue
+        fields = line.rstrip("\n").split("\t")
+        if len(fields) < 10:
+            continue
+        fmt = _parse_fmt(fields[8])
+        if not all(_passes_quality(fields, fmt, samples, a, min_dp, min_qual)
+                   for a in roles["affected"]):
+            continue
+        gt = {s: _sample_gt(fields, samples, s, fmt)[0]
+              for s in set().union(*roles.values())}
+        if (all(_is_hom_alt(gt[a]) for a in roles["affected"])
+                and all(_is_het(gt[c]) for c in roles["carriers"])
+                and all(_is_alt_carrier(gt[c]) for c in roles["carriers_any"])
+                and not any(_is_hom_alt(gt[u]) for u in roles["unaffected"])):
+            matches.append(line)
+    return matches, len(matches)
+
+
 def _filter_auto_dom(
     vcf_lines: list[str], header_lines: list[str],
     samples: list[str], child: str, father: str, mother: str,
@@ -351,21 +417,19 @@ def mendelian_filter(inp: MendelianFilterInput) -> MendelianFilterOutput:
             mother = ind.mother
             break
 
-    if father is None or mother is None:
-        raise ValueError(
-            f"El probando '{inp.proband}' no tiene padre y madre definidos "
-            f"en el pedigrí. Un análisis de trío requiere ambos."
-        )
-
     # Cargar el VCF
     header, data, samples = _load_vcf(vcf)
-
-    # Verificar que los tres samples están
-    for s in (inp.proband, father, mother):
-        if s not in samples:
-            raise ValueError(
-                f"Sample '{s}' no está en el VCF. Disponibles: {samples}"
-            )
+    if inp.proband not in samples:
+        raise ValueError(
+            f"Sample '{inp.proband}' no está en el VCF. Disponibles: {samples}"
+        )
+    # Los modelos de trío (de novo, dominante, ligado a X) necesitan padre y
+    # madre secuenciados; el recesivo familiar funciona también solo con
+    # hermanos (afectados 1/1, sanos no 1/1).
+    trio_ok = bool(father and mother and father in samples and mother in samples)
+    skipped: list[str] = []
+    if not trio_ok:
+        skipped = ["de_novo", "auto_dom", "x_linked_rec"]
 
     # Derivar affected_samples del pedigrí.
     # Si filter_by_affected es False, pasar lista vacía a auto_dom
@@ -377,29 +441,32 @@ def mendelian_filter(inp: MendelianFilterInput) -> MendelianFilterOutput:
         affected_samples = []
 
     # Aplicar los filtros
-    de_novo_lines, n_dn = _filter_de_novo(
-        data, header, samples, inp.proband, father, mother,
-        inp.min_dp, inp.min_qual,
+    roles = family_roles(inp.pedigree, samples, inp.proband)
+    rec_lines, n_rec = _filter_auto_rec_family(
+        data, samples, roles, inp.min_dp, inp.min_qual,
     )
-    rec_lines, n_rec = _filter_auto_rec_hom(
-        data, header, samples, inp.proband, father, mother,
-        inp.min_dp, inp.min_qual,
-    )
-    dom_lines, n_dom = _filter_auto_dom(
-        data, header, samples, inp.proband, father, mother,
-        affected_samples, inp.min_dp, inp.min_qual,
-    )
-
-    # Sexo del probando para X-linked
     child_sex = "U"
     for ind in inp.pedigree:
         if ind.sample == inp.proband:
             child_sex = ind.sex
             break
-    xrec_lines, n_xrec = _filter_x_linked_rec(
-        data, header, samples, inp.proband, father, mother,
-        child_sex, inp.min_dp, inp.min_qual,
-    )
+    if trio_ok:
+        de_novo_lines, n_dn = _filter_de_novo(
+            data, header, samples, inp.proband, father, mother,
+            inp.min_dp, inp.min_qual,
+        )
+        dom_lines, n_dom = _filter_auto_dom(
+            data, header, samples, inp.proband, father, mother,
+            affected_samples, inp.min_dp, inp.min_qual,
+        )
+        xrec_lines, n_xrec = _filter_x_linked_rec(
+            data, header, samples, inp.proband, father, mother,
+            child_sex, inp.min_dp, inp.min_qual,
+        )
+    else:
+        de_novo_lines, n_dn = [], 0
+        dom_lines, n_dom = [], 0
+        xrec_lines, n_xrec = [], 0
 
     # Escribir los sub-VCFs
     de_novo_vcf = outdir / "de_novo.vcf.gz"
@@ -419,6 +486,8 @@ def mendelian_filter(inp: MendelianFilterInput) -> MendelianFilterOutput:
         "mother": mother,
         "child_sex": child_sex,
         "affected_samples": affected_samples,
+        "family_roles": roles,
+        "skipped_models": skipped,
         "counts": {
             "de_novo": n_dn,
             "auto_rec_hom": n_rec,
@@ -438,6 +507,8 @@ def mendelian_filter(inp: MendelianFilterInput) -> MendelianFilterOutput:
         message=(
             f"de_novo={n_dn}  auto_rec_hom={n_rec}  "
             f"auto_dom={n_dom}  x_linked_rec={n_xrec}"
+            + (f"  (sin padre y madre secuenciados: omitidos {', '.join(skipped)})"
+               if skipped else "")
         ),
         outputs={
             "de_novo": str(de_novo_vcf),
