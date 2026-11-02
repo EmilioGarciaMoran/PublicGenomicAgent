@@ -323,6 +323,7 @@ class RuleBasedPlanner:
                 "output_dir": Path.cwd() / "results" / "mendelian",
                 "pedigree": [ind.model_dump() for ind in state.case.pedigree],
                 "proband": state.case.proband,
+                "regions": [roi.model_dump() for roi in state.case.candidate_rois],
             },
             rationale="Hay pedigree y VCF de trío, aplicamos filtros mendelianos.",
         )

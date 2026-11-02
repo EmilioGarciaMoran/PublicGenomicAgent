@@ -87,3 +87,41 @@ def test_run_family_consanguineous(tmp_path, monkeypatch):
         and het(g["FA"]) and het(g["MO"]) and not hom(g["S1"]))
     assert rep["counts"]["auto_rec_hom"] == expected
     assert "Segregación" in r.output and "sin BAM ['GF', 'GM', 'A', 'B', 'SA', 'SB']" in r.output
+
+
+def test_run_family_compound_het_consistent_with_joint_vcf(tmp_path, monkeypatch):
+    """Cada pareja de heterocigoto compuesto informada cumple las reglas sobre el VCF real."""
+    if not bin_path("pga-hts", "bcftools").exists():
+        pytest.skip("pga-hts no disponible")
+    from make_family_bams import make_family
+    from publicgenomicagent.cli.main import app
+
+    fam = make_family(tmp_path / "fam", PARENTS, n_sites=300, seed=21)
+    (tmp_path / "fam.ped").write_text(PED)
+    monkeypatch.chdir(tmp_path)
+    args = ["run-family", "--ped", str(tmp_path / "fam.ped"), "--reference", str(fam["ref"]),
+            "--region", "chr1:400-60500", "--label", "GENSIM", "--case-id", "ch", "--proband", "P1"]
+    for s in SEQ:
+        args += ["--bam", f"{s}={fam['bams'][s]}"]
+    r = CliRunner().invoke(app, args, env={"COLUMNS": "200"})
+    assert r.exit_code == 0, r.output
+    st = json.loads((tmp_path / "results" / "ch.session.json").read_text())
+    mf = next(c for c in st["tool_calls"] if c["tool_name"] == "mendelian_filter")
+    assert mf["input"]["regions"][0]["label"] == "GENSIM"
+    rep = json.loads(Path(mf["output"]["report_json"]).read_text())
+    assert "comp_het" in rep["counts"] and "comp_het_unphased" in rep["counts"]
+    joint = next(c for c in st["tool_calls"] if c["tool_name"] == "joint_call")["output"]["output_vcf"]
+    g = {f"{c[0]}\t{c[1]}": gt for c, gt in _gts(Path(joint))}
+    het = lambda x: x.get("GT") in ("0/1", "1/0", "0|1", "1|0")
+    carrier = lambda x: x.get("GT") in ("0/1", "1/0", "0|1", "1|0", "1/1", "1|1")
+    ref = lambda x: x.get("GT") in ("0/0", "0|0")
+    assert rep["comp_het_pairs"], "la familia simulada debería tener parejas candidatas"
+    for p in rep["comp_het_pairs"]:
+        a, b = (g["\t".join(p[k].split("\t")[:2])] for k in ("v1", "v2"))
+        assert all(het(a[s]) and het(b[s]) for s in ("P1", "P2"))
+        assert not any(carrier(a[s]) and carrier(b[s]) for s in ("FA", "MO", "S1"))
+        informative = [s for s in ("FA", "MO", "S1")
+                       if (carrier(a[s]) and ref(b[s])) or (carrier(b[s]) and ref(a[s]))]
+        assert p["phase"] == ("trans" if informative else "unknown")
+        assert sorted(p["phase_evidence"]) == sorted(informative)
+    assert rep["counts"]["comp_het"] == sum(p["phase"] == "trans" for p in rep["comp_het_pairs"])

@@ -326,6 +326,8 @@ class MendelianFilterInput(BaseModel):
     filter_by_affected: bool = True    # si False, dominante no exige
                                        # progenitor afectado (penetrancia
                                        # incompleta, variantes de riesgo)
+    regions: list[GenomicRange] = []   # ROIs (genes) para agrupar el
+                                       # heterocigoto compuesto
 
 
 class MendelianFilterOutput(ToolOutput):
@@ -333,6 +335,8 @@ class MendelianFilterOutput(ToolOutput):
     auto_rec_hom_vcf: Path
     auto_dom_vcf: Path
     x_linked_rec_vcf: Path | None = None
+    comp_het_vcf: Path | None = None             # parejas en trans demostrado
+    comp_het_unphased_vcf: Path | None = None    # parejas de fase no inferible
     report_json: Path
     counts: dict[str, int] = {}
 

@@ -161,6 +161,31 @@ abuelos (local_pangenome.md, sección 13). Con tres generaciones
 disponibles, el caso ambiguo de dos padres 0/1 en la misma variante se
 resuelve en la mayoría de los casos.
 
+### Implementación (`tools/mendelian.py`, `_filter_comp_het_family`)
+
+Funciona en familias de cualquier tamaño; el trío es un caso particular.
+
+- **Pareja candidata:** dos variantes del mismo gen, según la ROI que las
+  contiene o el `GENEINFO` del VCF. Todos los afectados secuenciados son
+  0/1 en ambas y ningún sano secuenciado lleva las dos ni es homocigoto de
+  ninguna. Con esto se descarta la configuración cis más frecuente: un
+  progenitor sano portador de ambas.
+- **Fase en trans:** queda demostrada si algún familiar secuenciado sano
+  (padre, madre o hermano) lleva exactamente una de las dos y la otra en
+  0/0. Dentro de un gen, en cis los familiares llevan las dos o ninguna.
+  Por eso, en familias de solo hermanos la fase se deduce de un hermano
+  sano informativo, sin necesidad de los padres.
+- **Fase desconocida:** sin ningún familiar informativo, la pareja va a
+  `comp_het_unphased.vcf.gz` y no se da por compuesta.
+- Variantes sin gen asignable no se emparejan, y el informe lo dice.
+
+**Limitación pendiente:** el filtro no exige rareza poblacional. Con
+variantes comunes el número de parejas crece de forma combinatoria (en
+una familia simulada solo con SNV comunes, 224 parejas en una región).
+Antes de usarlo con exomas reales hay que filtrar a variantes raras
+(p. ej. frecuencia en gnomAD < 1 %, idealmente con la población de
+Oriente Medio), según el embudo de la sección 5.
+
 ---
 
 ## 7. Casos borde a documentar, no a ignorar

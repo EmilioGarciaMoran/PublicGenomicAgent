@@ -132,3 +132,117 @@ def test_planner_handles_pedigree_members_without_bam(tmp_path):
             assert {i["sample"] for i in a.args["pedigree"]} >= {"GF", "GM", "A", "B"}
         _run(st, a)
     assert seq.count("qc_bam") == 5 and "joint_call" in seq and "mendelian_filter" in seq
+
+
+# --- heterocigoto compuesto ------------------------------------------------
+
+from publicgenomicagent.tools.base import GenomicRange
+from publicgenomicagent.tools.mendelian import _filter_comp_het_family
+
+GENE_A = GenomicRange(chrom="chr1", start=1, end=1000, label="GENA")
+GENE_B = GenomicRange(chrom="chr1", start=5000, end=6000, label="GENB")
+
+
+def vline(pos, samples, gts, dp=30, qual=50, info="."):
+    cols = ["chr1", str(pos), ".", "A", "G", str(qual), "PASS", info, "GT:DP"]
+    return "\t".join(cols + [f"{gts[s]}:{dp}" for s in samples]) + "\n"
+
+
+def ch(ped_text, samples, proband, variants, regions=(GENE_A, GENE_B), **kw):
+    """variants: lista de (pos, {sample: GT}). Devuelve las parejas encontradas."""
+    _, ped = parse_ped_text(ped_text)
+    roles = family_roles(ped, samples, proband)
+    lines = [vline(pos, samples, g, **kw) for pos, g in variants]
+    pairs, notes = _filter_comp_het_family(lines, samples, roles, ped, list(regions), 10, 20)
+    return pairs, notes
+
+
+TRIO_PED = "F father 0 0 1 1\nF mother 0 0 2 1\nF proband father mother 1 2\n"
+TRIO_S = ["father", "mother", "proband"]
+
+
+def test_trio_trans_phased_by_parents():
+    pairs, _ = ch(TRIO_PED, TRIO_S, "proband", [
+        (100, {"father": "0/1", "mother": "0/0", "proband": "0/1"}),
+        (200, {"father": "0/0", "mother": "0/1", "proband": "0/1"})])
+    assert len(pairs) == 1 and pairs[0]["gene"] == "GENA"
+    assert pairs[0]["phase"] == "trans" and set(pairs[0]["phase_evidence"]) == {"father", "mother"}
+
+
+def test_trio_cis_both_from_one_parent_is_excluded():
+    pairs, _ = ch(TRIO_PED, TRIO_S, "proband", [
+        (100, {"father": "0/1", "mother": "0/0", "proband": "0/1"}),
+        (200, {"father": "0/1", "mother": "0/0", "proband": "0/1"})])
+    assert pairs == []
+
+
+def test_trio_with_missing_parent_calls_is_unphased_not_forced():
+    pairs, _ = ch(TRIO_PED, TRIO_S, "proband", [
+        (100, {"father": "./.", "mother": "./.", "proband": "0/1"}),
+        (200, {"father": "./.", "mother": "./.", "proband": "0/1"})])
+    assert len(pairs) == 1 and pairs[0]["phase"] == "unknown"
+
+
+SIBS = "F D 0 0 1 0\nF M 0 0 2 0\nF A1 D M 1 2\nF A2 D M 2 2\nF U1 D M 1 1\n"
+SIBS_S = ["A1", "A2", "U1"]                      # padres sin BAM
+
+
+def test_siblings_only_phase_from_unaffected_sib():
+    pairs, _ = ch(SIBS, SIBS_S, "A1", [
+        (100, {"A1": "0/1", "A2": "0/1", "U1": "0/1"}),     # U1 lleva solo v1
+        (300, {"A1": "0/1", "A2": "0/1", "U1": "0/0"})])
+    assert len(pairs) == 1 and pairs[0]["phase"] == "trans"
+    assert pairs[0]["phase_evidence"] == ["U1"]
+
+
+def test_siblings_only_without_informative_sib_is_unphased():
+    pairs, _ = ch(SIBS, SIBS_S, "A1", [
+        (100, {"A1": "0/1", "A2": "0/1", "U1": "0/0"}),
+        (300, {"A1": "0/1", "A2": "0/1", "U1": "0/0"})])
+    assert len(pairs) == 1 and pairs[0]["phase"] == "unknown"
+
+
+def test_unaffected_sib_with_both_variants_excludes_pair():
+    pairs, _ = ch(SIBS, SIBS_S, "A1", [
+        (100, {"A1": "0/1", "A2": "0/1", "U1": "0/1"}),
+        (300, {"A1": "0/1", "A2": "0/1", "U1": "0/1"})])
+    assert pairs == []
+
+
+def test_affected_sib_missing_one_variant_excludes_pair():
+    pairs, _ = ch(SIBS, SIBS_S, "A1", [
+        (100, {"A1": "0/1", "A2": "0/1", "U1": "0/1"}),
+        (300, {"A1": "0/1", "A2": "0/0", "U1": "0/0"})])
+    assert pairs == []
+
+
+def test_variants_in_different_genes_are_not_paired_and_geneinfo_groups():
+    pairs, _ = ch(TRIO_PED, TRIO_S, "proband", [
+        (100, {"father": "0/1", "mother": "0/0", "proband": "0/1"}),
+        (5500, {"father": "0/0", "mother": "0/1", "proband": "0/1"})])
+    assert pairs == []
+    pairs, notes = ch(TRIO_PED, TRIO_S, "proband", [
+        (9000, {"father": "0/1", "mother": "0/0", "proband": "0/1"}),
+        (9100, {"father": "0/0", "mother": "0/1", "proband": "0/1"})],
+        info="GENEINFO=NPHP1:4867")
+    assert len(pairs) == 1 and pairs[0]["gene"] == "NPHP1"
+    pairs, notes = ch(TRIO_PED, TRIO_S, "proband", [
+        (9000, {"father": "0/1", "mother": "0/0", "proband": "0/1"}),
+        (9100, {"father": "0/0", "mother": "0/1", "proband": "0/1"})])
+    assert pairs == [] and "sin gen asignable" in notes[0]
+
+
+def test_low_depth_in_affected_excludes():
+    pairs, _ = ch(TRIO_PED, TRIO_S, "proband", [
+        (100, {"father": "0/1", "mother": "0/0", "proband": "0/1"}),
+        (200, {"father": "0/0", "mother": "0/1", "proband": "0/1"})], dp=5)
+    assert pairs == []
+
+
+def test_three_hets_in_one_gene_give_all_valid_pairs():
+    pairs, _ = ch(TRIO_PED, TRIO_S, "proband", [
+        (100, {"father": "0/1", "mother": "0/0", "proband": "0/1"}),
+        (200, {"father": "0/0", "mother": "0/1", "proband": "0/1"}),
+        (300, {"father": "0/1", "mother": "0/0", "proband": "0/1"})])
+    got = sorted((p["v1"].split("\t")[1], p["v2"].split("\t")[1]) for p in pairs)
+    assert got == [("100", "200"), ("200", "300")]       # 100-300 es cis (ambas del padre)

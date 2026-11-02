@@ -296,6 +296,91 @@ def _filter_auto_rec_family(
     return matches, len(matches)
 
 
+def _gene_key(fields: list[str], regions: list) -> str | None:
+    """Gen de una variante: ROI que la contiene (su etiqueta) o GENEINFO del INFO."""
+    chrom, pos = fields[0], int(fields[1])
+    for r in regions:
+        rc = r.chrom if hasattr(r, "chrom") else r["chrom"]
+        rs = r.start if hasattr(r, "start") else r["start"]
+        re_ = r.end if hasattr(r, "end") else r["end"]
+        lab = (r.label if hasattr(r, "label") else r.get("label")) or f"{rc}:{rs}-{re_}"
+        if rc.removeprefix("chr") == chrom.removeprefix("chr") and rs <= pos <= re_:
+            return lab
+    for kv in fields[7].split(";"):
+        if kv.startswith("GENEINFO="):
+            return kv.split("=", 1)[1].split("|")[0].split(":")[0]
+    return None
+
+
+def _filter_comp_het_family(
+    vcf_lines: list[str], samples: list[str], roles: dict[str, list[str]],
+    pedigree: list[IndividualSpec], regions: list, min_dp: int, min_qual: int,
+) -> tuple[list[dict], list[str]]:
+    """Heterocigoto compuesto en una familia de cualquier tamaño.
+
+    Pareja (v1, v2) en el mismo gen, candidata si:
+      - todos los afectados secuenciados (el probando siempre) son 0/1 en
+        ambas, con QUAL y DP suficientes;
+      - ningún no afectado secuenciado (padres incluidos) es portador de
+        las dos, ni homocigoto de ninguna. Esto descarta la configuración
+        cis (un progenitor sano con ambas variantes).
+    Fase:
+      - "trans" si algún familiar secuenciado no afectado (padre, madre o
+        hermano) lleva exactamente una de las dos con la otra 0/0: dentro de
+        un gen, en cis los familiares llevan ambas o ninguna;
+      - "unknown" si no hay ningún familiar informativo: no se fuerza la
+        conclusión (mendelian_segregation.md, §6).
+    Devuelve (parejas, notas).
+    """
+    notes: list[str] = []
+    affected = roles["affected"]
+    unaffected = roles["carriers"] + roles["unaffected"]
+    informative = unaffected + roles["carriers_any"]
+    by_gene: dict[str, list[tuple[str, dict]]] = {}
+    no_gene = 0
+    for line in vcf_lines:
+        if line.startswith("#"):
+            continue
+        fields = line.rstrip("\n").split("\t")
+        if len(fields) < 10:
+            continue
+        fmt = _parse_fmt(fields[8])
+        if not all(_passes_quality(fields, fmt, samples, a, min_dp, min_qual) for a in affected):
+            continue
+        gt = {s: _sample_gt(fields, samples, s, fmt)[0] for s in samples}
+        if not all(_is_het(gt[a]) for a in affected):
+            continue
+        if any(_is_hom_alt(gt[u]) for u in unaffected):
+            continue
+        gene = _gene_key(fields, regions)
+        if gene is None:
+            no_gene += 1
+            continue
+        by_gene.setdefault(gene, []).append((line, gt))
+    if no_gene:
+        notes.append(f"{no_gene} variantes heterocigotas sin gen asignable (ni ROI ni GENEINFO): "
+                     "no se emparejan")
+    pairs: list[dict] = []
+    for gene, vs in by_gene.items():
+        for i in range(len(vs)):
+            for j in range(i + 1, len(vs)):
+                (l1, g1), (l2, g2) = vs[i], vs[j]
+                if any(_is_alt_carrier(g1[u]) and _is_alt_carrier(g2[u]) for u in unaffected):
+                    continue                      # un sano con ambas: cis o no causal
+                evidence = [x for x in informative
+                            if (_is_alt_carrier(g1[x]) and _is_hom_ref(g2[x]))
+                            or (_is_alt_carrier(g2[x]) and _is_hom_ref(g1[x]))]
+                pairs.append({
+                    "gene": gene,
+                    "v1": "\t".join(l1.split("\t")[:5]),
+                    "v2": "\t".join(l2.split("\t")[:5]),
+                    "phase": "trans" if evidence else "unknown",
+                    "phase_evidence": evidence,
+                    "lines": (l1, l2),
+                })
+    return pairs, notes
+
+
 def _filter_auto_dom(
     vcf_lines: list[str], header_lines: list[str],
     samples: list[str], child: str, father: str, mother: str,
@@ -445,6 +530,18 @@ def mendelian_filter(inp: MendelianFilterInput) -> MendelianFilterOutput:
     rec_lines, n_rec = _filter_auto_rec_family(
         data, samples, roles, inp.min_dp, inp.min_qual,
     )
+    ch_pairs, ch_notes = _filter_comp_het_family(
+        data, samples, roles, inp.pedigree, inp.regions, inp.min_dp, inp.min_qual,
+    )
+    def _uniq(ps):
+        seen, out = set(), []
+        for p_ in ps:
+            for l_ in p_["lines"]:
+                if l_ not in seen:
+                    seen.add(l_); out.append(l_)
+        return sorted(out, key=lambda l_: (l_.split("\t")[0], int(l_.split("\t")[1])))
+    ch_trans = [p_ for p_ in ch_pairs if p_["phase"] == "trans"]
+    ch_unk = [p_ for p_ in ch_pairs if p_["phase"] == "unknown"]
     child_sex = "U"
     for ind in inp.pedigree:
         if ind.sample == inp.proband:
@@ -478,6 +575,10 @@ def mendelian_filter(inp: MendelianFilterInput) -> MendelianFilterOutput:
     _write_subvcf(rec_vcf, header, rec_lines)
     _write_subvcf(dom_vcf, header, dom_lines)
     _write_subvcf(xrec_vcf, header, xrec_lines)
+    ch_vcf = outdir / "comp_het.vcf.gz"
+    ch_unk_vcf = outdir / "comp_het_unphased.vcf.gz"
+    _write_subvcf(ch_vcf, header, _uniq(ch_trans))
+    _write_subvcf(ch_unk_vcf, header, _uniq(ch_unk))
 
     # Report
     report = {
@@ -493,7 +594,11 @@ def mendelian_filter(inp: MendelianFilterInput) -> MendelianFilterOutput:
             "auto_rec_hom": n_rec,
             "auto_dom": n_dom,
             "x_linked_rec": n_xrec,
+            "comp_het": len(ch_trans),
+            "comp_het_unphased": len(ch_unk),
         },
+        "comp_het_pairs": [{k: v for k, v in p_.items() if k != "lines"} for p_ in ch_pairs],
+        "comp_het_notes": ch_notes,
         "total_input_variants": len(data),
         "min_dp": inp.min_dp,
         "min_qual": inp.min_qual,
@@ -506,7 +611,8 @@ def mendelian_filter(inp: MendelianFilterInput) -> MendelianFilterOutput:
         tool="mendelian_filter",
         message=(
             f"de_novo={n_dn}  auto_rec_hom={n_rec}  "
-            f"auto_dom={n_dom}  x_linked_rec={n_xrec}"
+            f"auto_dom={n_dom}  x_linked_rec={n_xrec}  "
+            f"comp_het={len(ch_trans)} (+{len(ch_unk)} sin fase)"
             + (f"  (sin padre y madre secuenciados: omitidos {', '.join(skipped)})"
                if skipped else "")
         ),
@@ -515,12 +621,16 @@ def mendelian_filter(inp: MendelianFilterInput) -> MendelianFilterOutput:
             "auto_rec_hom": str(rec_vcf),
             "auto_dom": str(dom_vcf),
             "x_linked_rec": str(xrec_vcf),
+            "comp_het": str(ch_vcf),
+            "comp_het_unphased": str(ch_unk_vcf),
             "report": str(report_path),
         },
         de_novo_vcf=de_novo_vcf,
         auto_rec_hom_vcf=rec_vcf,
         auto_dom_vcf=dom_vcf,
         x_linked_rec_vcf=xrec_vcf,
+        comp_het_vcf=ch_vcf,
+        comp_het_unphased_vcf=ch_unk_vcf,
         report_json=report_path,
         counts=report["counts"],
     )
