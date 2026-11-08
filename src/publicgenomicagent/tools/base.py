@@ -287,6 +287,24 @@ class IndividualSpec(BaseModel):
     phenotype_known: bool = True       # False si el PED dice 0/-9 (desconocido)
 
 
+class AnnotateFrequencyInput(BaseModel):
+    """Frecuencia gnomAD v4 en las ROIs (ver tools/frequency.py)."""
+    vcf: Path
+    output_vcf: Path
+    regions: list[GenomicRange]
+    refresh: bool = False
+
+
+class AnnotateFrequencyOutput(ToolOutput):
+    output_vcf: Path
+    n_variants: int
+    n_found: int
+    n_absent: int
+    n_multiallelic_skipped: int = 0
+    gnomad_variants_in_regions: int = 0
+    method: str = ""
+
+
 class VerifyRelatednessInput(BaseModel):
     """Verificación familiar con IBS local (ver tools/relatedness.py)."""
     bams: list[tuple[str, Path]]          # (sample del PED, BAM completo)
@@ -328,6 +346,9 @@ class MendelianFilterInput(BaseModel):
                                        # incompleta, variantes de riesgo)
     regions: list[GenomicRange] = []   # ROIs (genes) para agrupar el
                                        # heterocigoto compuesto
+    max_af: float | None = None        # descartar variantes con AF gnomAD
+                                       # (global o MID) > max_af; exige que
+                                       # el VCF venga de annotate_frequency
 
 
 class MendelianFilterOutput(ToolOutput):

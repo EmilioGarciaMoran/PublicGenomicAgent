@@ -38,10 +38,11 @@ _STAGES: tuple[tuple[str, int, bool], ...] = (
     ("call_variants", 3, True),
     ("joint_call", 4, True),
     ("annotate_variants", 5, False),
-    ("mendelian_filter", 6, True),
-    ("extract_hpo", 7, False),
-    ("phenotype_ranking", 8, False),
-    ("prioritize_variants", 9, False),
+    ("annotate_frequency", 6, True),
+    ("mendelian_filter", 7, True),
+    ("extract_hpo", 8, False),
+    ("phenotype_ranking", 9, False),
+    ("prioritize_variants", 10, False),
 )
 _STAGE = {t: s for t, s, _ in _STAGES}
 OPTIONAL_TOOLS = frozenset(t for t, _, r in _STAGES if not r)
@@ -54,6 +55,7 @@ _RULE_ATTR = {
     "call_variants": "_rule_call_variants",
     "joint_call": "_rule_joint_call",
     "annotate_variants": "_rule_annotate",
+    "annotate_frequency": "_rule_annotate_frequency",
     "mendelian_filter": "_rule_mendelian",
     "extract_hpo": "_rule_extract_hpo",
     "phenotype_ranking": "_rule_phenotype_ranking",

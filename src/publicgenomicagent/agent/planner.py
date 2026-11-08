@@ -118,6 +118,7 @@ class RuleBasedPlanner:
             self._rule_call_variants,
             self._rule_joint_call,
             self._rule_annotate,
+            self._rule_annotate_frequency,
             self._rule_mendelian,
             self._rule_extract_hpo,
             self._rule_phenotype_ranking,
@@ -309,8 +310,11 @@ class RuleBasedPlanner:
             return None
         # Preferir el VCF anotado si existe: asi auto_rec_hom
         # hereda CLNSIG/CLNDN del VCF anotado.
+        if state.params.get("max_af") is not None and "frequency" not in state.vcfs:
+            return None          # esperar a la anotación de frecuencia; nunca filtrar sin ella
         trio_vcf = (
-            state.vcfs.get("annotated")
+            state.vcfs.get("frequency")
+            or state.vcfs.get("annotated")
             or state.vcfs.get("trio")
             or state.vcfs.get("joint")
         )
@@ -324,8 +328,31 @@ class RuleBasedPlanner:
                 "pedigree": [ind.model_dump() for ind in state.case.pedigree],
                 "proband": state.case.proband,
                 "regions": [roi.model_dump() for roi in state.case.candidate_rois],
+                "max_af": state.params.get("max_af"),
             },
             rationale="Hay pedigree y VCF de trío, aplicamos filtros mendelianos.",
+        )
+
+    def _rule_annotate_frequency(self, state: AgentState) -> PlannedAction | None:
+        """Frecuencia gnomAD si se pidió filtro de rareza (--max-af)."""
+        if state.params.get("max_af") is None or "frequency" in state.vcfs:
+            return None
+        trio = state.vcfs.get("trio")
+        if trio is None or not state.case.candidate_rois:
+            return None
+        if state.references.get("clinvar") is not None and "annotated" not in state.vcfs:
+            return None          # primero ClinVar, para encadenar sobre su salida
+        if any(c.ok for c in state.calls_of("annotate_frequency")):
+            return None
+        src = state.vcfs.get("annotated") or trio
+        return PlannedAction(
+            tool_name="annotate_frequency",
+            args={
+                "vcf": src,
+                "output_vcf": Path(str(src).replace(".vcf.gz", ".freq.vcf.gz")),
+                "regions": [roi.model_dump() for roi in state.case.candidate_rois],
+            },
+            rationale="Filtro de rareza pedido: anotamos frecuencia gnomAD v4 (global y MID).",
         )
 
     def _rule_annotate(self, state: AgentState) -> PlannedAction | None:

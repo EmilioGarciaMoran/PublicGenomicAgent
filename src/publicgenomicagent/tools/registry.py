@@ -59,6 +59,8 @@ from .base import (
     ToolOutput,
     VerifyRelatednessInput,
     VerifyRelatednessOutput,
+    AnnotateFrequencyInput,
+    AnnotateFrequencyOutput,
 )
 from .annotate import annotate_variants
 from .prioritize import prioritize_variants
@@ -73,6 +75,7 @@ from .local_pangenome import local_pangenome
 from .mendelian import mendelian_filter, plink_validate
 from .phenotype_ranking import phenotype_ranking
 from .qc import qc_bam
+from .frequency import annotate_frequency
 from .relatedness import verify_relatedness
 
 
@@ -115,6 +118,15 @@ TOOL_REGISTRY: dict[str, ToolSpec] = {
         needs_runtime=True,
         description="QC de un BAM: header, índice, orden, muestras, counts.",
         tags=("hts", "qc"),
+    ),
+    "annotate_frequency": ToolSpec(
+        name="annotate_frequency",
+        func=annotate_frequency,
+        input_model=AnnotateFrequencyInput,
+        output_model=AnnotateFrequencyOutput,
+        needs_runtime=False,
+        description="Frecuencia gnomAD v4 (global y Oriente Medio) en las ROIs, con caché local.",
+        tags=("annotation", "frequency"),
     ),
     "verify_relatedness": ToolSpec(
         name="verify_relatedness",

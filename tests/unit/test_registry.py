@@ -31,6 +31,7 @@ EXPECTED_TOOLS = {
     "prioritize_variants",
     "qc_bam",
     "verify_relatedness",
+    "annotate_frequency",
 }
 
 

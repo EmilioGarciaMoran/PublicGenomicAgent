@@ -125,3 +125,56 @@ def test_run_family_compound_het_consistent_with_joint_vcf(tmp_path, monkeypatch
         assert p["phase"] == ("trans" if informative else "unknown")
         assert sorted(p["phase_evidence"]) == sorted(informative)
     assert rep["counts"]["comp_het"] == sum(p["phase"] == "trans" for p in rep["comp_het_pairs"])
+
+
+def test_run_family_rare_variant_filter(tmp_path, monkeypatch):
+    """--max-af: con gnomAD simulado, ninguna variante común llega a los modelos."""
+    if not bin_path("pga-hts", "bcftools").exists():
+        pytest.skip("pga-hts no disponible")
+    import publicgenomicagent.tools.frequency as freq
+    from make_family_bams import make_family
+    from publicgenomicagent.cli.main import app
+
+    fam = make_family(tmp_path / "fam", PARENTS, n_sites=300, seed=21)
+    (tmp_path / "fam.ped").write_text(PED)
+    sites = [l.split("\t") for l in Path(fam["sites"]).read_text().splitlines()]
+    common = {int(p) for i, (_, p, _, _) in enumerate(sites) if i % 10}   # 90% comunes
+    mid_only = {int(sites[0][1])}                                         # común solo en MID
+
+    def fake_fetch(chrom, start, stop, refresh=False):
+        out = []
+        for c, p, r, a in sites:
+            p = int(p)
+            if not start <= p <= stop:
+                continue
+            if p in mid_only:
+                ex = {"ac": 1, "an": 10000, "populations": [{"id": "mid", "ac": 30, "an": 1000}]}
+            elif p in common:
+                ex = {"ac": 3000, "an": 10000, "populations": [{"id": "mid", "ac": 300, "an": 1000}]}
+            else:
+                ex = {"ac": 2, "an": 10000, "populations": [{"id": "mid", "ac": 0, "an": 1000}]}
+            out.append({"variant_id": f"1-{p}-{r}-{a}", "pos": p, "ref": r, "alt": a,
+                        "exome": ex, "genome": None})
+        return out
+
+    monkeypatch.setattr(freq, "fetch_region_af", fake_fetch)
+    monkeypatch.chdir(tmp_path)
+    args = ["run-family", "--ped", str(tmp_path / "fam.ped"), "--reference", str(fam["ref"]),
+            "--region", "chr1:400-60500", "--label", "GENSIM", "--case-id", "rare",
+            "--proband", "P1", "--max-af", "0.01"]
+    for s in SEQ:
+        args += ["--bam", f"{s}={fam['bams'][s]}"]
+    r = CliRunner().invoke(app, args, env={"COLUMNS": "200"})
+    assert r.exit_code == 0, r.output
+    st = json.loads((tmp_path / "results" / "rare.session.json").read_text())
+    tools = [c["tool_name"] for c in st["tool_calls"]]
+    assert tools.index("joint_call") < tools.index("annotate_frequency") < tools.index("mendelian_filter")
+    assert st["params"]["max_af"] == 0.01
+    mf = next(c for c in st["tool_calls"] if c["tool_name"] == "mendelian_filter")
+    assert mf["input"]["max_af"] == 0.01 and mf["input"]["trio_vcf"].endswith(".freq.vcf.gz")
+    rep = json.loads(Path(mf["output"]["report_json"]).read_text())
+    rf = rep["rarity_filter"]
+    assert rf["removed_common"] > 0 and rf["removed_common_mid_only"] == 1
+    reported = {int(p[k].split("\t")[1]) for p in rep["comp_het_pairs"] for k in ("v1", "v2")}
+    assert not reported & (common | mid_only)
+    assert rep["counts"]["comp_het"] + rep["counts"]["comp_het_unphased"] < 224

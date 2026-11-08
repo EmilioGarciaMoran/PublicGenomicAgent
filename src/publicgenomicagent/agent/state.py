@@ -108,6 +108,10 @@ class AgentState(BaseModel):
     # (p.ej. "relatedness_not_verifiable"). Quedan en el session.json.
     gate_overrides: list[str] = Field(default_factory=list)
 
+    # Parámetros de análisis elegidos por la persona (p.ej. max_af).
+    # Quedan en el session.json.
+    params: dict[str, Any] = Field(default_factory=dict)
+
     # --- API de consulta -------------------------------------------------
 
     def latest(self, tool_name: str) -> dict[str, Any] | None:
@@ -268,6 +272,9 @@ def _register_side_effects(state: AgentState, tool_name: str, out: ToolOutput) -
     elif tool_name == "prioritize_variants":
         if "output_vcf" in d:
             state.vcfs["prioritized"] = Path(d["output_vcf"])
+    elif tool_name == "annotate_frequency":
+        if d.get("output_vcf"):
+            state.vcfs["frequency"] = Path(d["output_vcf"])
     elif tool_name == "annotate_variants":
         if "output_vcf" in d:
             state.vcfs["annotated"] = Path(d["output_vcf"])

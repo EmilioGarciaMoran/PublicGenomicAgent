@@ -230,6 +230,36 @@ def _filter_auto_rec_hom(
     return matches, len(matches)
 
 
+def rare_filter(header: list[str], lines: list[str], max_af: float) -> tuple[list[str], dict]:
+    """Descarta variantes con PGA_AF o PGA_AF_MID > max_af.
+
+    Exige que el VCF venga de `annotate_frequency` (marca en la cabecera):
+    sin ella no se puede distinguir "rara" de "no anotada", y se falla.
+    Una variante sin PGA_AF (ausente en gnomAD) se conserva como rara.
+    """
+    if not any(h.startswith("##PGA_frequency_source=") for h in header):
+        raise ValueError(
+            "max_af pedido pero el VCF no tiene frecuencias de annotate_frequency: "
+            "no se puede distinguir una variante rara de una no anotada")
+    kept: list[str] = []
+    st = {"max_af": max_af, "removed_common": 0, "removed_common_mid_only": 0,
+          "kept_absent_in_gnomad": 0, "kept": 0}
+    for line in lines:
+        info = dict(kv.split("=", 1) for kv in line.split("\t")[7].split(";") if "=" in kv)
+        af = float(info["PGA_AF"].split(",")[0]) if "PGA_AF" in info else None
+        af_mid = float(info["PGA_AF_MID"].split(",")[0]) if "PGA_AF_MID" in info else None
+        if af is None:
+            st["kept_absent_in_gnomad"] += 1
+        if (af is not None and af > max_af) or (af_mid is not None and af_mid > max_af):
+            st["removed_common"] += 1
+            if af is not None and af <= max_af:
+                st["removed_common_mid_only"] += 1
+            continue
+        kept.append(line)
+    st["kept"] = len(kept)
+    return kept, st
+
+
 def family_roles(
     pedigree: list[IndividualSpec], samples: list[str], proband: str,
 ) -> dict[str, list[str]]:
@@ -525,6 +555,11 @@ def mendelian_filter(inp: MendelianFilterInput) -> MendelianFilterOutput:
     else:
         affected_samples = []
 
+    # Rareza poblacional antes de cualquier modelo
+    rarity = None
+    if inp.max_af is not None:
+        data, rarity = rare_filter(header, data, inp.max_af)
+
     # Aplicar los filtros
     roles = family_roles(inp.pedigree, samples, inp.proband)
     rec_lines, n_rec = _filter_auto_rec_family(
@@ -588,6 +623,7 @@ def mendelian_filter(inp: MendelianFilterInput) -> MendelianFilterOutput:
         "child_sex": child_sex,
         "affected_samples": affected_samples,
         "family_roles": roles,
+        "rarity_filter": rarity,
         "skipped_models": skipped,
         "counts": {
             "de_novo": n_dn,

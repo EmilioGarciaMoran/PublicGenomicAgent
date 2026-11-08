@@ -26,8 +26,14 @@ def _registry():
     return load_registry(registry_path())
 
 
-def _apply_family_options(state, ped, relatedness_sites, allow_unverified) -> None:
-    """Aplica --ped, --relatedness-sites y la excepción humana al estado."""
+def _apply_family_options(state, ped, relatedness_sites, allow_unverified, max_af=None) -> None:
+    """Aplica --ped, --relatedness-sites, la excepción humana y --max-af al estado."""
+    if max_af is not None:
+        if not 0 < max_af < 1:
+            console.print(f"[red]--max-af debe estar entre 0 y 1, no {max_af}[/red]")
+            raise typer.Exit(code=2)
+        state.params["max_af"] = max_af
+        state.note(f"filtro de rareza: AF gnomAD v4 (global y Oriente Medio) <= {max_af}")
     if ped:
         from publicgenomicagent.tools.pedigree import find_proband, load_ped, validate_pedigree
 
@@ -728,6 +734,11 @@ def run_trio(
         help="Decisión humana: continuar si la verificación familiar resulta "
              "'no verificable' (pocos sitios). Queda registrada en la sesión.",
     ),
+    max_af: float = typer.Option(
+        None, "--max-af",
+        help="Filtro de rareza: descarta variantes con frecuencia gnomAD v4 (global u "
+             "Oriente Medio) mayor que este valor, p.ej. 0.01. Anota frecuencias antes.",
+    ),
 ) -> None:
     """Ejecuta el loop agéntico sobre un trío.
 
@@ -780,7 +791,7 @@ def run_trio(
         state.references["clinvar"] = clinvar_path
         console.print(f"[dim]ClinVar configurado: {clinvar_path.name}[/dim]")
 
-    _apply_family_options(state, ped, relatedness_sites, allow_unverified_relatedness)
+    _apply_family_options(state, ped, relatedness_sites, allow_unverified_relatedness, max_af)
     ctx = SessionContext(state=state, runtime=_runtime())
     from publicgenomicagent.agent.planner import (
         RuleBasedPlanner,
@@ -874,6 +885,11 @@ def run_family(
         False, "--allow-unverified-relatedness",
         help="Decisión humana registrada: continuar si la verificación familiar es 'no verificable'.",
     ),
+    max_af: float = typer.Option(
+        None, "--max-af",
+        help="Filtro de rareza: descarta variantes con frecuencia gnomAD v4 (global u "
+             "Oriente Medio) mayor que este valor, p.ej. 0.01. Anota frecuencias antes.",
+    ),
 ) -> None:
     """Analiza una familia de cualquier tamaño a partir de un PED y un BAM por individuo.
 
@@ -917,7 +933,7 @@ def run_family(
     if proband and proband not in bams:
         console.print(f"[red]El probando {proband} no tiene BAM (--bam {proband}=...)[/red]")
         raise typer.Exit(code=2)
-    _apply_family_options(state, ped, relatedness_sites, allow_unverified_relatedness)
+    _apply_family_options(state, ped, relatedness_sites, allow_unverified_relatedness, max_af)
     if state.case.proband not in bams:
         console.print(f"[red]El probando {state.case.proband} no tiene BAM[/red]")
         raise typer.Exit(code=2)
@@ -1249,6 +1265,11 @@ def sandbox_run(
         help="Decisión humana: continuar si la verificación familiar resulta "
              "'no verificable' (pocos sitios). Queda registrada en la sesión.",
     ),
+    max_af: float = typer.Option(
+        None, "--max-af",
+        help="Filtro de rareza: descarta variantes con frecuencia gnomAD v4 (global u "
+             "Oriente Medio) mayor que este valor, p.ej. 0.01. Anota frecuencias antes.",
+    ),
     max_steps: int = typer.Option(20, "--max-steps"),
 ) -> None:
     """Ejecuta el pipeline de PGA sobre un caso Sandbox."""
@@ -1386,7 +1407,7 @@ def sandbox_run(
         console.print("[red]--planner debe ser rule, llm o decision[/red]")
         raise typer.Exit(code=2)
 
-    _apply_family_options(state, ped, relatedness_sites, allow_unverified_relatedness)
+    _apply_family_options(state, ped, relatedness_sites, allow_unverified_relatedness, max_af)
     ctx = SessionContext(state=state, runtime=_runtime())
     loop = AgentLoop(max_steps=max_steps, planner=planner)
     results = loop.run(ctx)
