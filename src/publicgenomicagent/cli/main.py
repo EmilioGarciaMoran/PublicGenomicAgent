@@ -1076,6 +1076,14 @@ def report(
         "report.html", "--out", "-o",
         help="Fichero HTML de salida",
     ),
+    viewer: str = typer.Option(
+        "jbrowse", "--viewer",
+        help="jbrowse (visor embebido sin red) | none (solo tablas y enlaces IGV)",
+    ),
+    no_reads: bool = typer.Option(
+        False, "--no-reads",
+        help="No incrustar lecturas (BAM) en el visor: solo genotipos y referencia",
+    ),
 ) -> None:
     """Genera un informe HTML autocontenido a partir de un session.json."""
     from publicgenomicagent.agent.report import render_session_report
@@ -1086,7 +1094,11 @@ def report(
         raise typer.Exit(code=2)
 
     try:
-        out_path = render_session_report(src_path, Path(out))
+        if viewer not in ("jbrowse", "none"):
+            console.print("[red]--viewer debe ser jbrowse o none[/red]")
+            raise typer.Exit(code=2)
+        out_path = render_session_report(src_path, Path(out), viewer=viewer,
+                                         include_reads=not no_reads)
     except Exception as e:  # noqa: BLE001
         console.print(f"[red]ERROR[/red] {type(e).__name__}: {e}")
         raise typer.Exit(code=1)

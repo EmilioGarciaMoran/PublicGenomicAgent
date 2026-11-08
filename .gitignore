@@ -54,3 +54,7 @@ cases/demo_trio.bak_bamaker/
 
 # Runtime outputs
 results/
+
+# E3: dependencias de compilación del visor (no se versionan)
+tools_build/jbrowse/node_modules/
+*_viewer_data/
