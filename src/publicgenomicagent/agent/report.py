@@ -491,7 +491,12 @@ def _render_rarity(data: dict) -> str:
         return '<p class="empty">No population-frequency filter (run without --max-af).</p>'
     out = []
     if af:
-        out.append(f"<p>{_e(af.get('message'))} · method <code>{_e(af.get('method'))}</code></p>")
+        n, found = af.get("n_variants", 0), af.get("n_found", 0)
+        mm = af.get("n_ref_mismatch", 0)
+        out.append(f"<p>gnomAD v4: {found}/{n} variants with population frequency, {af.get('n_absent', n - found)} absent"
+                   + (f'; <strong style="color:var(--err)">{mm} with REF different from gnomAD '
+                      "(reference not GRCh38?)</strong>" if mm else "")
+                   + f" · method <code>{_e(af.get('method'))}</code></p>")
     if rf:
         out.append("<table><tbody>" + "".join(_row([f"<code>{_e(k)}</code>", _e(v)])
                                              for k, v in rf.items()) + "</tbody></table>")
