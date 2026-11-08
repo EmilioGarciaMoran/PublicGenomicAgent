@@ -27,6 +27,9 @@ pga = "publicgenomicagent.cli.main:app"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"publicgenomicagent.agent" = ["vendor/*"]
+
 [tool.pytest.ini_options]
 markers = [
     "integration: tests que requieren entornos micromamba reales",

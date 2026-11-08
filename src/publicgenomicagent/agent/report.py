@@ -417,7 +417,128 @@ def _render_igv_section(session_json: Path, data: dict) -> str:
     return "\n".join(parts)
 
 
-def render_session_report(session_json: Path | str, output_html: Path | str) -> Path:
+# ---------------------------------------------------------------------------
+# E3: verificación primero, heterocigoto compuesto, rareza y visor embebido
+# ---------------------------------------------------------------------------
+
+def _badge(status: str) -> str:
+    color = {"passed": "var(--ok)", "warning": "#b7791f", "failed": "var(--err)",
+             "not_verifiable": "#b7791f", True: "var(--ok)", False: "var(--err)"}.get(status, "var(--muted)")
+    label = {True: "passed", False: "failed"}.get(status, status)
+    return f'<strong style="color:{color}">{_e(label)}</strong>'
+
+
+def _render_verification(data: dict) -> str:
+    calls = data.get("tool_calls", [])
+    bams = {str(v): k for k, v in (data.get("bams") or {}).items()}
+    parts = []
+    qc = [c for c in calls if c.get("tool_name") == "qc_bam" and c.get("ok")]
+    if qc:
+        rows = []
+        for c in qc:
+            o = c.get("output") or {}
+            sample = c["input"].get("expected_sample") or bams.get(c["input"].get("bam_path"), "?")
+            rows.append(_row([f"<code>{_e(sample)}</code>", _badge(o.get("passed")),
+                              _e("; ".join(o.get("issues") or []) or "—"),
+                              _e("; ".join(o.get("warnings") or []) or "—")]))
+        parts.append("<h3>Per-sample QC</h3><table><thead><tr><th>Sample</th><th>Status</th>"
+                     f"<th>Issues</th><th>Warnings</th></tr></thead><tbody>{''.join(rows)}</tbody></table>")
+    rel = next((c for c in reversed(calls) if c.get("tool_name") == "verify_relatedness" and c.get("ok")), None)
+    if rel:
+        o = rel.get("output") or {}
+        rows = []
+        for p in o.get("pairs", []):
+            r = p.get("relatedness")
+            rows.append(_row([f"{_e(p['a'])}–{_e(p['b'])}", _e(p.get("declared")),
+                              f"{p.get('expected_relatedness', 0):.3f}",
+                              "—" if r is None else f"{r:.3f}", f"{p['ibs0']}/{p['n']}",
+                              _badge(p.get("status"))]))
+        parts.append(f"<h3>Family verification (local IBS): {_badge(o.get('status'))}</h3>"
+                     f"<p>{o.get('n_sites_panel', 0)} panel sites.</p>"
+                     "<table><thead><tr><th>Pair</th><th>Declared</th><th>Expected r</th>"
+                     "<th>Observed r</th><th>IBS0</th><th>Status</th></tr></thead>"
+                     f"<tbody>{''.join(rows)}</tbody></table>")
+    else:
+        parts.append('<p class="empty">Family verification not run (no sites panel '
+                     'given with --relatedness-sites).</p>')
+    params = data.get("params") or {}
+    overrides = data.get("gate_overrides") or []
+    gate = [n for n in data.get("notes", []) if "puerta QC cerrada" in n]
+    parts.append("<h3>Analysis parameters and human decisions</h3><ul>"
+                 + "".join(f"<li><code>{_e(k)}</code> = {_e(v)}</li>" for k, v in params.items())
+                 + "".join(f"<li>Human override: <code>{_e(o)}</code></li>" for o in overrides)
+                 + ("<li>None</li>" if not params and not overrides else "") + "</ul>")
+    if gate:
+        parts.append('<p style="color:var(--err)"><strong>QC gate closed:</strong> '
+                     f"{_e(gate[-1])}</p>")
+    return "\n".join(parts)
+
+
+def _mendelian_report(outputs: dict) -> dict:
+    p = (outputs.get("mendelian_filter") or {}).get("report_json")
+    try:
+        return json.loads(Path(p).read_text()) if p and Path(p).exists() else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _render_rarity(data: dict) -> str:
+    outputs = data.get("outputs") or {}
+    af = outputs.get("annotate_frequency") or {}
+    rep = _mendelian_report(outputs)
+    rf = rep.get("rarity_filter")
+    if not af and not rf:
+        return '<p class="empty">No population-frequency filter (run without --max-af).</p>'
+    out = []
+    if af:
+        n, found = af.get("n_variants", 0), af.get("n_found", 0)
+        mm = af.get("n_ref_mismatch", 0)
+        out.append(f"<p>gnomAD v4: {found}/{n} variants with population frequency, {af.get('n_absent', n - found)} absent"
+                   + (f'; <strong style="color:var(--err)">{mm} with REF different from gnomAD '
+                      "(reference not GRCh38?)</strong>" if mm else "")
+                   + f" · method <code>{_e(af.get('method'))}</code></p>")
+    if rf:
+        out.append("<table><tbody>" + "".join(_row([f"<code>{_e(k)}</code>", _e(v)])
+                                             for k, v in rf.items()) + "</tbody></table>")
+    return "\n".join(out)
+
+
+def _render_comp_het(outputs: dict) -> str:
+    rep = _mendelian_report(outputs)
+    pairs = rep.get("comp_het_pairs") or []
+    if not pairs:
+        return '<p class="empty">No compound heterozygous pairs.</p>'
+    rows = [_row([_e(p["gene"]), f"<code>{_e(' '.join(p['v1'].split(chr(9))[:2]))}</code>",
+                  f"<code>{_e(' '.join(p['v2'].split(chr(9))[:2]))}</code>", _e(p["phase"]),
+                  _e(", ".join(p.get("phase_evidence") or []) or "—")]) for p in pairs[:50]]
+    more = f"<p>… and {len(pairs) - 50} more.</p>" if len(pairs) > 50 else ""
+    return ("<table><thead><tr><th>Gene</th><th>Variant 1</th><th>Variant 2</th><th>Phase</th>"
+            f"<th>Phase evidence</th></tr></thead><tbody>{''.join(rows)}</tbody></table>{more}")
+
+
+def _render_viewer(data: dict, workdir: Path, include_reads: bool) -> str:
+    try:
+        from .viewer import build_viewspec, render_jbrowse
+        vs = build_viewspec(data)
+        if vs is None:
+            return '<p class="empty">Nothing to display (no ROI or candidates).</p>'
+        html, meta = render_jbrowse(vs, workdir, include_reads=include_reads)
+    except Exception as e:  # noqa: BLE001
+        return (f'<p class="empty">Embedded viewer not available: {_e(type(e).__name__)}: '
+                f"{_e(str(e))}. Use the IGV section below.</p>")
+    hl = "".join(f"<li><code>{_e(c)}:{p} {_e(r)}&gt;{_e(a)}</code> — {_e(why)}</li>"
+                 for c, p, r, a, why in vs.highlights[:10])
+    warn = ('<p style="color:var(--err)"><strong>Privacy:</strong> this report embeds sequencing '
+            "reads. Share it only for synthetic cases or through a controlled channel.</p>"
+            if include_reads else "")
+    return (f"{warn}<p>Locus <code>{_e(meta['locus'])}</code> · embedded window "
+            f"<code>{_e(meta['window'])}</code> · {meta['embedded_bytes'] / 1e3:.0f} KB of data · "
+            f"JBrowse component sha256 <code>{meta['bundle_sha256'][:16]}…</code></p>"
+            + (f"<p>Candidates:</p><ul>{hl}</ul>" if hl else "") + html)
+
+
+def render_session_report(session_json: Path | str, output_html: Path | str,
+                          viewer: str = "jbrowse", include_reads: bool = True) -> Path:
     """Render a session.json into a self-contained HTML report.
 
     Returns the path to the written HTML file.
@@ -459,10 +580,13 @@ def render_session_report(session_json: Path | str, output_html: Path | str) -> 
         '</div>'
     )
 
+    body_parts.append(_section("1. Data verification", _render_verification(data)))
+    body_parts.append(_section("Population frequency (rare-variant filter)", _render_rarity(data)))
     body_parts.append(_section("Pedigree", _render_pedigree(case)))
     body_parts.append(_section("Regions of interest", _render_rois(case)))
-    body_parts.append(_section("Pipeline executed", _render_tool_calls(tool_calls)))
+    body_parts.append(_section("2. Analysis — pipeline executed", _render_tool_calls(tool_calls)))
     body_parts.append(_section("Candidate variants", _render_mendelian_stats(outputs)))
+    body_parts.append(_section("Compound heterozygous pairs", _render_comp_het(outputs)))
 
     # Sección extendida: variantes del VCF auto_rec_hom (si existe)
     # Buscamos el VCF en el output de mendelian_filter
@@ -490,6 +614,9 @@ def render_session_report(session_json: Path | str, output_html: Path | str) -> 
     if ranking_html:
         body_parts.append(_section("Prioritised variants", ranking_html))
 
+    if viewer == "jbrowse":
+        body_parts.append(_section("3. Embedded viewer (offline)", _render_viewer(
+            data, output_path.parent / f"{output_path.stem}_viewer_data", include_reads)))
     body_parts.append(_section("VCF files produced", _render_vcfs(vcfs)))
     body_parts.append(_section("Open in IGV", _render_igv_section(session_path, data)))
 

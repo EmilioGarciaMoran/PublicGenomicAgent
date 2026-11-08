@@ -1,0 +1,14 @@
+{
+  "name": "pga-jbrowse-bundle",
+  "private": true,
+  "description": "Compila el visor JBrowse embebido de los informes de PGA",
+  "scripts": {
+    "build": "esbuild entry.js --bundle --minify --format=iife --platform=browser --define:process.env.NODE_ENV='\"production\"' --loader:.js=jsx --legal-comments=external --outfile=../../src/publicgenomicagent/agent/vendor/jbrowse-lgv.min.js"
+  },
+  "dependencies": {
+    "@jbrowse/react-linear-genome-view2": "4.3.0",
+    "esbuild": "0.24.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  }
+}
