@@ -301,6 +301,7 @@ class AnnotateFrequencyOutput(ToolOutput):
     n_found: int
     n_absent: int
     n_multiallelic_skipped: int = 0
+    n_ref_mismatch: int = 0              # REF distinto de gnomAD: referencia no GRCh38
     gnomad_variants_in_regions: int = 0
     method: str = ""
 

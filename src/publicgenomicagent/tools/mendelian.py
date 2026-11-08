@@ -243,12 +243,14 @@ def rare_filter(header: list[str], lines: list[str], max_af: float) -> tuple[lis
             "no se puede distinguir una variante rara de una no anotada")
     kept: list[str] = []
     st = {"max_af": max_af, "removed_common": 0, "removed_common_mid_only": 0,
-          "kept_absent_in_gnomad": 0, "kept": 0}
+          "kept_absent_in_gnomad": 0, "kept_ref_mismatch": 0, "kept": 0}
     for line in lines:
         info = dict(kv.split("=", 1) for kv in line.split("\t")[7].split(";") if "=" in kv)
         af = float(info["PGA_AF"].split(",")[0]) if "PGA_AF" in info else None
         af_mid = float(info["PGA_AF_MID"].split(",")[0]) if "PGA_AF_MID" in info else None
-        if af is None:
+        if "PGA_REF_MISMATCH" in line.split("\t")[7].split(";"):
+            st["kept_ref_mismatch"] += 1      # frecuencia no aplicable: se conserva y se cuenta
+        elif af is None:
             st["kept_absent_in_gnomad"] += 1
         if (af is not None and af > max_af) or (af_mid is not None and af_mid > max_af):
             st["removed_common"] += 1

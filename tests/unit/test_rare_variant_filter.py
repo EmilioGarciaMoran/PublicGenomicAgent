@@ -60,7 +60,7 @@ def test_annotate_lines_adds_fields_and_header_mark():
     hdr, lines, st = annotate_lines(HDR, [vline(10, info="CLNSIG=x"), vline(20), vline(30, alt="G,T")], lookup)
     assert "CLNSIG=x;PGA_AF=0.2;PGA_AC=20;PGA_AN=100;PGA_AF_MID=0.5;PGA_AN_MID=10" in lines[0]
     assert lines[1] == vline(20)                       # ausente en gnomAD: sin campos
-    assert st == {"n": 3, "found": 1, "absent": 1, "multiallelic_skipped": 1}
+    assert st == {"n": 3, "found": 1, "absent": 1, "multiallelic_skipped": 1, "ref_mismatch": 0}
     assert hdr[-1].startswith("#CHROM") and any(h.startswith(HEADER_MARK) for h in hdr)
 
 
@@ -161,3 +161,15 @@ def test_mendelian_waits_if_frequency_annotation_never_succeeds(tmp_path):
     st.params["max_af"] = 0.01
     st.vcfs["trio"] = tmp_path / "joint.vcf.gz"
     assert RuleBasedPlanner()._rule_mendelian(st) is None          # nunca sin frecuencias
+
+
+def test_ref_mismatch_with_gnomad_is_flagged_not_called_absent():
+    """Caso real: Sandbox con referencia sintética (A en 22:42128941; GRCh38 y gnomAD: C)."""
+    lookup = {("22", 42128941, "C", "T"): {"af": 0.3, "ac": 3, "an": 10, "af_mid": None, "an_mid": 0},
+              ("22", 42128941, "C", "A"): {"af": 0.1, "ac": 1, "an": 10, "af_mid": None, "an_mid": 0}}
+    line = "chr22\t42128941\t.\tA\tT\t50\tPASS\t.\tGT\t1/1\n"
+    hdr, lines, st = annotate_lines(HDR, [line, vline(99)], lookup)
+    assert st["ref_mismatch"] == 1 and st["absent"] == 1
+    assert "PGA_REF_MISMATCH" in lines[0] and "PGA_AF" not in lines[0]
+    kept, rs = rare_filter(hdr, lines, 0.01)
+    assert len(kept) == 2 and rs["kept_ref_mismatch"] == 1 and rs["kept_absent_in_gnomad"] == 1
