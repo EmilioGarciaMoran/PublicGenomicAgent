@@ -67,4 +67,6 @@ def test_tools_discover_novel_variant_only_with_surject(tmp_path):
     target = (t + 1, r, alt)
     assert target in _calls(sj.vcf)            # descubierta desde las lecturas
     assert target not in _calls(gg.vcf)        # vg call no puede: no está en el grafo
+    known = {(p + 1, r, al) for p, (r, al) in cohort.items()}
+    assert len(known & _calls(gg.vcf)) > len(known) // 2   # pero sí genotipa los alelos de la cohorte
     assert sj.method == "surject" and gg.method == "graph_genotype"

@@ -269,9 +269,14 @@ def call_from_graph(
         for f in (g, xg, pack):
             if not f.exists():
                 raise FileNotFoundError(f"no existe: {f}")
-        with vcf_plain.open("wb") as out_f:
+        raw = vcf.with_suffix(".vgcall.vcf")
+        with raw.open("wb") as out_f:
             runtime.run("vg", ["call", str(xg), "-k", str(pack)],
                         stdout=out_f, stderr=subprocess.PIPE)
+        # vg call informa por burbuja: variantes cercanas pueden salir en un solo
+        # registro (REF de varias bases). Se separan en variantes simples.
+        runtime.run("bcftools", ["norm", "-a", "-m", "-any", "-Ov", "-o", str(vcf_plain), str(raw)])
+        raw.unlink()
 
     # Comprimir a .vcf.gz con bcftools (BGZF) para permitir tabix
     # El nombre final esperado es <...>.vcf.gz; aceptamos tanto .vcf
