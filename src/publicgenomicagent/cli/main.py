@@ -350,9 +350,12 @@ def tool_align_to_graph(
     graph: str = typer.Option(..., "--graph", "-g",
                               help="Fichero .vg del grafo"),
     reads: str = typer.Option(..., "--reads", "-r",
-                              help="Lecturas en FASTQ"),
-    out: str = typer.Option(..., "--out", "-o",
-                            help="GAM de salida"),
+                              help="Lecturas en FASTQ (lectura 1)"),
+    reads2: str = typer.Option(None, "--reads2", help="Lectura 2 del par (opcional)"),
+    bam: str = typer.Option(None, "--bam", help="BAM proyectado a la referencia lineal"),
+    out: str = typer.Option(None, "--out", "-o",
+                            help="GAM de salida (necesario para --pack)"),
+    sample: str = typer.Option("SAMPLE", "--sample", help="Nombre de muestra en el BAM"),
     pack: str = typer.Option(None, "--pack",
                              help="Pack de cobertura (opcional)"),
     min_quality: int = typer.Option(5, "--min-quality",
@@ -364,36 +367,46 @@ def tool_align_to_graph(
     inp = AlignToGraphInput(
         graph_vg=Path(graph),
         reads_fastq=Path(reads),
-        output_gam=Path(out),
+        reads_fastq_2=Path(reads2) if reads2 else None,
+        output_bam=Path(bam) if bam else None,
+        output_gam=Path(out) if out else None,
+        sample_name=sample,
         output_pack=Path(pack) if pack else None,
         pack_min_quality=min_quality,
     )
     result = align_to_graph(_runtime(), inp)
     console.print(f"[green]OK[/green] {result.message}")
-    console.print(f"  GAM: {result.gam}")
+    if result.bam:
+        console.print(f"  BAM: {result.bam}")
+    if result.gam:
+        console.print(f"  GAM: {result.gam}")
     if result.pack:
         console.print(f"  pack: {result.pack}")
 
 
 @tool_app.command("call-from-graph")
 def tool_call_from_graph(
-    graph: str = typer.Option(..., "--graph", "-g",
-                              help="Fichero .vg del grafo"),
-    xg: str = typer.Option(..., "--xg", help="Índice .xg"),
-    pack: str = typer.Option(..., "--pack", help="Pack de cobertura"),
     out: str = typer.Option(..., "--out", "-o",
                             help="VCF de salida"),
+    method: str = typer.Option("surject", "--method",
+                               help="surject (bcftools sobre el BAM proyectado; descubre variantes nuevas) | "
+                                    "graph_genotype (vg call; solo sitios ya presentes en el grafo)"),
+    bam: str = typer.Option(None, "--bam", help="surject: BAM de align-to-graph --bam"),
+    reference: str = typer.Option(None, "--reference", "-f", help="surject: FASTA de referencia"),
+    min_mapq: int = typer.Option(0, "--min-mapq", help="surject: MAPQ mínimo"),
+    graph: str = typer.Option(None, "--graph", "-g", help="graph_genotype: fichero .vg"),
+    xg: str = typer.Option(None, "--xg", help="graph_genotype: índice .xg"),
+    pack: str = typer.Option(None, "--pack", help="graph_genotype: pack de cobertura"),
     sample_name: str = typer.Option(None, "--sample-name",
                                     help="Renombrar el sample del VCF (por defecto: SAMPLE)"),
 ) -> None:
     from publicgenomicagent.tools.base import CallFromGraphInput
     from publicgenomicagent.tools.local_graph import call_from_graph
 
+    p = lambda x: Path(x) if x else None  # noqa: E731
     inp = CallFromGraphInput(
-        graph_vg=Path(graph),
-        graph_xg=Path(xg),
-        pack=Path(pack),
-        output_vcf=Path(out),
+        output_vcf=Path(out), method=method, bam=p(bam), reference_fasta=p(reference),
+        min_mapq=min_mapq, graph_vg=p(graph), graph_xg=p(xg), pack=p(pack),
         sample_name=sample_name,
     )
     result = call_from_graph(_runtime(), inp)

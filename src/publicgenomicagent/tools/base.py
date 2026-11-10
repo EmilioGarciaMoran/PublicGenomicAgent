@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from enum import Enum
 from pathlib import Path
 
@@ -233,6 +235,7 @@ class BuildLocalGraphInput(BaseModel):
 class BuildLocalGraphOutput(ToolOutput):
     graph_vg: Path
     graph_xg: Path
+    giraffe_gbz: Path | None = None   # índices de giraffe (vg autoindex) junto al .vg
     nodes: int = 0
     edges: int = 0
 
@@ -242,13 +245,17 @@ class BuildLocalGraphOutput(ToolOutput):
 class AlignToGraphInput(BaseModel):
     graph_vg: Path
     reads_fastq: Path
-    output_gam: Path
+    reads_fastq_2: Path | None = None  # segunda lectura del par (opcional)
+    output_bam: Path | None = None     # lecturas proyectadas a la referencia lineal (BAM ordenado)
+    output_gam: Path | None = None     # alineamiento en el grafo (necesario para pack)
     output_pack: Path | None = None
     pack_min_quality: int = 5
+    sample_name: str = "SAMPLE"
 
 
 class AlignToGraphOutput(ToolOutput):
-    gam: Path
+    gam: Path | None = None
+    bam: Path | None = None
     pack: Path | None = None
     reads_aligned: int = 0
     reads_total: int = 0
@@ -257,16 +264,23 @@ class AlignToGraphOutput(ToolOutput):
 # --- call_from_graph --------------------------------------------------
 
 class CallFromGraphInput(BaseModel):
-    graph_vg: Path
-    graph_xg: Path
-    pack: Path
     output_vcf: Path
-    sample_name: str | None = None    # si se da, renombra SAMPLE en el VCF
+    # "surject" (por defecto): bcftools sobre el BAM proyectado; descubre variantes nuevas.
+    # "graph_genotype": vg call sobre el pack; SOLO genotipa sitios ya presentes en el grafo.
+    method: Literal["surject", "graph_genotype"] = "surject"
+    bam: Path | None = None              # surject
+    reference_fasta: Path | None = None  # surject
+    min_mapq: int = 0                    # surject: -q de bcftools mpileup
+    graph_vg: Path | None = None         # graph_genotype
+    graph_xg: Path | None = None         # graph_genotype
+    pack: Path | None = None             # graph_genotype
+    sample_name: str | None = None    # si se da, renombra la muestra en el VCF
 
 
 class CallFromGraphOutput(ToolOutput):
     vcf: Path
     vcf_tbi: Path
+    method: str = "surject"
     variants_total: int = 0
 
 

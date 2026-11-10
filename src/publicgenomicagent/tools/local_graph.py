@@ -96,6 +96,21 @@ def build_local_graph(
     index_args = ["index", "-x", str(out_xg), "-L", str(out_vg)]
     runtime.run("vg", index_args)
 
+    # Índices de giraffe (gbz, minimizadores, distancias) con el mismo VCF:
+    # necesarios para alinear y proyectar lecturas a la referencia lineal.
+    vcf_gz = vcf
+    if not str(vcf).endswith(".gz"):
+        vcf_gz = out_vg.with_suffix(".cohort.vcf.gz")
+        runtime.run("bcftools", ["view", str(vcf), "-Oz", "-o", str(vcf_gz)])
+    if not Path(str(vcf_gz) + ".tbi").exists() and not Path(str(vcf_gz) + ".csi").exists():
+        runtime.run("bcftools", ["index", "-t", str(vcf_gz)])
+    prefix = out_vg.with_suffix("")
+    tmp = out_vg.parent / f".{out_vg.stem}_tmp"
+    tmp.mkdir(exist_ok=True)
+    runtime.run("vg", ["autoindex", "--workflow", "giraffe", "-r", str(ref), "-v", str(vcf_gz),
+                       "-p", str(prefix), "-T", str(tmp)])
+    gbz = Path(f"{prefix}.giraffe.gbz")
+
     # Contar nodos y edges con vg stats -z (devuelve dos líneas: nodes/edges)
     nodes, edges = 0, 0
     try:
@@ -114,9 +129,10 @@ def build_local_graph(
         ok=True,
         tool="build_local_graph",
         message=f"Grafo {out_vg.name}: {nodes} nodos, {edges} edges",
-        outputs={"vg": str(out_vg), "xg": str(out_xg)},
+        outputs={"vg": str(out_vg), "xg": str(out_xg), "giraffe_gbz": str(gbz)},
         graph_vg=out_vg,
         graph_xg=out_xg,
+        giraffe_gbz=gbz,
         nodes=nodes,
         edges=edges,
     )
@@ -130,79 +146,92 @@ def align_to_graph(
     runtime: ToolRuntime,
     inp: AlignToGraphInput,
 ) -> AlignToGraphOutput:
-    """Alinea lecturas (FASTQ) contra un grafo con vg giraffe.
+    """Alinea lecturas (FASTQ, simples o pareadas) contra el grafo local con vg giraffe.
 
-    - graph_vg: grafo .vg.
-    - reads_fastq: lecturas sin alinear.
-    - output_gam: alineamiento en formato GAM.
-    - output_pack: opcional, cobertura empaquetada para vg call.
+    - output_bam: lecturas proyectadas (surject) a la referencia lineal, ordenadas e
+      indexadas; es la entrada de call_from_graph(method="surject").
+    - output_gam / output_pack: alineamiento en el grafo y su cobertura, solo para
+      call_from_graph(method="graph_genotype").
+    Requiere los índices de giraffe de build_local_graph (<prefijo>.giraffe.gbz).
     """
     _require_vg(runtime)
-
     g = Path(inp.graph_vg).expanduser().resolve()
     fq = Path(inp.reads_fastq).expanduser().resolve()
-    gam = Path(inp.output_gam).expanduser().resolve()
-
+    fq2 = Path(inp.reads_fastq_2).expanduser().resolve() if inp.reads_fastq_2 else None
     if not g.exists():
         raise FileNotFoundError(f"grafo no existe: {g}")
-    if not fq.exists():
-        raise FileNotFoundError(f"FASTQ no existe: {fq}")
+    for f in (fq, fq2):
+        if f is not None and not f.exists():
+            raise FileNotFoundError(f"FASTQ no existe: {f}")
+    if inp.output_bam is None and inp.output_gam is None:
+        raise ValueError("indica output_bam (llamada por surject) y/o output_gam")
+    if inp.output_pack is not None and inp.output_gam is None:
+        raise ValueError("output_pack requiere output_gam")
+    prefix = g.with_suffix("")
+    idx = {"-Z": Path(f"{prefix}.giraffe.gbz"), "-m": Path(f"{prefix}.shortread.withzip.min"),
+           "-z": Path(f"{prefix}.shortread.zipcodes"), "-d": Path(f"{prefix}.dist")}
+    missing = [str(p) for p in idx.values() if not p.exists()]
+    if missing:
+        raise FileNotFoundError("faltan índices de giraffe (reconstruye con build_local_graph): "
+                                + ", ".join(missing))
+    base = [a for k, p in idx.items() for a in (k, str(p))] + ["-f", str(fq)]
+    if fq2:
+        base += ["-f", str(fq2)]
 
-    gam.parent.mkdir(parents=True, exist_ok=True)
+    bam: Path | None = None
+    if inp.output_bam is not None:
+        bam = Path(inp.output_bam).expanduser().resolve()
+        bam.parent.mkdir(parents=True, exist_ok=True)
+        raw = bam.with_suffix(".unsorted.bam")
+        with raw.open("wb") as out_f:
+            runtime.run("vg", ["giraffe", *base, "-o", "BAM", "--sample", inp.sample_name,
+                               "--read-group", inp.sample_name], stdout=out_f, stderr=subprocess.PIPE)
+        runtime.run("samtools", ["sort", "-o", str(bam), str(raw)])
+        runtime.run("samtools", ["index", str(bam)])
+        raw.unlink()
 
-    # giraffe puede crear automáticamente los índices secundarios
-    # (gbz, dist, minimizers) si no están.
-    xg = g.with_suffix(".xg")
-    if not xg.exists():
-        runtime.run("vg", ["index", "-x", str(xg), "-L", str(g)])
+    gam: Path | None = None
+    reads_total = reads_aligned = 0
+    if inp.output_gam is not None:
+        gam = Path(inp.output_gam).expanduser().resolve()
+        gam.parent.mkdir(parents=True, exist_ok=True)
+        with gam.open("wb") as out_f:
+            runtime.run("vg", ["giraffe", *base, "-o", "gam"], stdout=out_f, stderr=subprocess.PIPE)
+        try:
+            for line in runtime.capture("vg", ["stats", "-a", str(gam)]).splitlines():
+                key, _, val = line.partition(":")
+                val = (val.strip().split() or ["0"])[0]
+                if key.strip().lower() == "total alignments":
+                    reads_total = int(val)
+                elif key.strip().lower() == "total aligned":
+                    reads_aligned = int(val)
+        except Exception:  # noqa: BLE001
+            pass
+    elif bam is not None:
+        try:
+            st = runtime.capture("samtools", ["flagstat", str(bam)]).splitlines()
+            reads_total = int(st[0].split()[0])
+            reads_aligned = int(next(l for l in st if " mapped (" in l).split()[0])
+        except Exception:  # noqa: BLE001
+            pass
 
-    # vg giraffe: lee FASTQ (-f), escribe GAM a stdout
-    with gam.open("wb") as out_f:
-        runtime.run(
-            "vg",
-            ["giraffe", "-x", str(xg), "-f", str(fq), "-o", "gam"],
-            stdout=out_f,
-            stderr=subprocess.PIPE,
-        )
-
-    # Contar lecturas alineadas con vg stats -a (o con vg view -a)
-    reads_total = 0
-    reads_aligned = 0
-    try:
-        stats_out = runtime.capture("vg", ["stats", "-a", str(gam)])
-        for line in stats_out.splitlines():
-            if ":" not in line:
-                continue
-            key, _, val = line.partition(":")
-            key = key.strip().lower()
-            val = val.strip().split()[0] if val.strip() else "0"
-            if key == "total alignments":
-                reads_total = int(val)
-            elif key == "total aligned":
-                reads_aligned = int(val)
-    except Exception:
-        pass
-
-    # Pack (opcional)
     pack_out: Path | None = None
     if inp.output_pack is not None:
+        xg = g.with_suffix(".xg")
+        if not xg.exists():
+            runtime.run("vg", ["index", "-x", str(xg), "-L", str(g)])
         pack_out = Path(inp.output_pack).expanduser().resolve()
         pack_out.parent.mkdir(parents=True, exist_ok=True)
-        runtime.run(
-            "vg",
-            ["pack", "-x", str(xg), "-g", str(gam),
-             "-Q", str(inp.pack_min_quality), "-o", str(pack_out)],
-        )
+        runtime.run("vg", ["pack", "-x", str(xg), "-g", str(gam),
+                           "-Q", str(inp.pack_min_quality), "-o", str(pack_out)])
 
     return AlignToGraphOutput(
         ok=True,
         tool="align_to_graph",
         message=f"{reads_aligned}/{reads_total} lecturas alineadas al grafo",
-        outputs={
-            "gam": str(gam),
-            **({"pack": str(pack_out)} if pack_out else {}),
-        },
+        outputs={k: str(v) for k, v in (("gam", gam), ("bam", bam), ("pack", pack_out)) if v},
         gam=gam,
+        bam=bam,
         pack=pack_out,
         reads_aligned=reads_aligned,
         reads_total=reads_total,
@@ -217,38 +246,44 @@ def call_from_graph(
     runtime: ToolRuntime,
     inp: CallFromGraphInput,
 ) -> CallFromGraphOutput:
-    """Llama variantes desde un pack sobre un grafo con vg call.
+    """Llama variantes tras alinear al grafo local.
 
-    - graph_vg: grafo .vg.
-    - graph_xg: índice .xg.
-    - pack: cobertura empaquetada (de align_to_graph).
-    - output_vcf: VCF resultante.
+    method="surject" (por defecto): bcftools mpileup + call sobre el BAM proyectado
+    a la referencia lineal. Descubre variantes nuevas: la ganancia viene de alinear
+    mejor, no de que el grafo contenga la respuesta (docs/benchmark_local_pangenome.md).
+
+    method="graph_genotype": vg call sobre el pack. Solo genotipa sitios que ya están
+    en el grafo (alelos de la cohorte); NO descubre variantes nuevas.
     """
-    _require_vg(runtime)
-
-    g = Path(inp.graph_vg).expanduser().resolve()
-    xg = Path(inp.graph_xg).expanduser().resolve()
-    pack = Path(inp.pack).expanduser().resolve()
     vcf = Path(inp.output_vcf).expanduser().resolve()
-
-    if not g.exists():
-        raise FileNotFoundError(f"grafo no existe: {g}")
-    if not xg.exists():
-        raise FileNotFoundError(f"índice .xg no existe: {xg}")
-    if not pack.exists():
-        raise FileNotFoundError(f"pack no existe: {pack}")
-
     vcf.parent.mkdir(parents=True, exist_ok=True)
-
-    # vg call emite VCF plano por stdout
     vcf_plain = vcf.with_suffix(".plain.vcf")
-    with vcf_plain.open("wb") as out_f:
-        runtime.run(
-            "vg",
-            ["call", str(xg), "-k", str(pack)],
-            stdout=out_f,
-            stderr=subprocess.PIPE,
-        )
+    if inp.method == "surject":
+        if inp.bam is None or inp.reference_fasta is None:
+            raise ValueError("method='surject' requiere bam y reference_fasta")
+        bam = Path(inp.bam).expanduser().resolve()
+        ref = Path(inp.reference_fasta).expanduser().resolve()
+        for f in (bam, ref):
+            if not f.exists():
+                raise FileNotFoundError(f"no existe: {f}")
+        pile = vcf.with_suffix(".pileup.bcf")
+        runtime.run("bcftools", ["mpileup", "-f", str(ref), "-a", "AD,DP", "-q", str(inp.min_mapq),
+                                 "-d", "10000", "-Ou", "-o", str(pile), str(bam)])
+        runtime.run("bcftools", ["call", "-mv", "-Ov", "-o", str(vcf_plain), str(pile)])
+        pile.unlink()
+    else:
+        _require_vg(runtime)
+        if not (inp.graph_vg and inp.graph_xg and inp.pack):
+            raise ValueError("method='graph_genotype' requiere graph_vg, graph_xg y pack")
+        g = Path(inp.graph_vg).expanduser().resolve()
+        xg = Path(inp.graph_xg).expanduser().resolve()
+        pack = Path(inp.pack).expanduser().resolve()
+        for f in (g, xg, pack):
+            if not f.exists():
+                raise FileNotFoundError(f"no existe: {f}")
+        with vcf_plain.open("wb") as out_f:
+            runtime.run("vg", ["call", str(xg), "-k", str(pack)],
+                        stdout=out_f, stderr=subprocess.PIPE)
 
     # Comprimir a .vcf.gz con bcftools (BGZF) para permitir tabix
     # El nombre final esperado es <...>.vcf.gz; aceptamos tanto .vcf
@@ -287,9 +322,10 @@ def call_from_graph(
     return CallFromGraphOutput(
         ok=True,
         tool="call_from_graph",
-        message=f"{variants_total} variantes llamadas desde el grafo",
+        message=f"{variants_total} variantes ({inp.method})",
         outputs={"vcf": str(vcf_gz), "tbi": str(vcf_tbi)},
         vcf=vcf_gz,
         vcf_tbi=vcf_tbi,
+        method=inp.method,
         variants_total=variants_total,
     )

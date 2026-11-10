@@ -213,7 +213,7 @@ TOOL_REGISTRY: dict[str, ToolSpec] = {
         input_model=BuildLocalGraphInput,
         output_model=BuildLocalGraphOutput,
         needs_runtime=True,
-        description="Construye un grafo vg a partir de referencia + cohorte VCF.",
+        description="Construye un grafo vg local (referencia + cohorte VCF) y sus índices de giraffe.",
         tags=("pangenome", "graph"),
     ),
     "align_to_graph": ToolSpec(
@@ -222,7 +222,7 @@ TOOL_REGISTRY: dict[str, ToolSpec] = {
         input_model=AlignToGraphInput,
         output_model=AlignToGraphOutput,
         needs_runtime=True,
-        description="Alinea lecturas FASTQ contra un grafo vg (vg giraffe).",
+        description="Alinea lecturas FASTQ (simples o pareadas) contra el grafo local con vg giraffe y las proyecta a BAM lineal.",
         tags=("pangenome", "graph", "align"),
     ),
     "call_from_graph": ToolSpec(
@@ -231,7 +231,7 @@ TOOL_REGISTRY: dict[str, ToolSpec] = {
         input_model=CallFromGraphInput,
         output_model=CallFromGraphOutput,
         needs_runtime=True,
-        description="Llama variantes desde un grafo + pack (vg call).",
+        description="Llama variantes tras alinear al grafo: bcftools sobre el BAM proyectado (descubre nuevas); opcional vg call (solo sitios del grafo).",
         tags=("pangenome", "graph", "variants"),
     ),
 

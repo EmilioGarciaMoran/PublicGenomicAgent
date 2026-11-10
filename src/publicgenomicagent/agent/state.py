@@ -264,6 +264,8 @@ def _register_side_effects(state: AgentState, tool_name: str, out: ToolOutput) -
         if "graph_xg" in d:
             state.artifacts["graph_xg"] = Path(d["graph_xg"])
     elif tool_name == "align_to_graph":
+        if d.get("bam"):
+            state.artifacts["graph_bam"] = Path(d["bam"])
         if d.get("pack"):
             state.artifacts["pack"] = Path(d["pack"])
     elif tool_name == "joint_call":

@@ -109,6 +109,18 @@ present in the graph; without graph augmentation it can only report a
 variant that is already in the graph. The reads had MAPQ 0 set by hand
 rather than by an aligner.
 
+## In the PGA tools
+
+Since 2026-11-10 the PGA tools follow this design: `build_local_graph`
+also builds the giraffe indexes, `align_to_graph --bam` projects the
+reads to the linear reference, and `call_from_graph` calls with bcftools
+on that BAM by default (`method="surject"`). The previous behaviour,
+`vg call` on the graph, remains as `method="graph_genotype"` and only
+genotypes sites already in the graph.
+`tests/integration/test_local_graph_tools.py` runs the three tools on
+the divergent scenario: the surject path finds the novel variant, the
+graph-genotype path does not.
+
 ## Reproduce
 
 ```bash
