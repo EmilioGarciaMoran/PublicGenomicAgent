@@ -56,7 +56,7 @@ def build_local_graph(
     runtime: ToolRuntime,
     inp: BuildLocalGraphInput,
 ) -> BuildLocalGraphOutput:
-    """Construye un grafo local del ROI con vg construct.
+    """Construye un grafo local del ROI (vg autoindex: referencia + VCF) y sus índices de giraffe.
 
     - reference_fasta: FASTA del ROI (con contig coherente con el VCF).
     - cohort_vcf: VCF con variantes poblacionales (AF, SVs, etc.).
@@ -77,27 +77,10 @@ def build_local_graph(
 
     out_vg.parent.mkdir(parents=True, exist_ok=True)
 
-    # Comando base
-    args: list[str] = [
-        "construct",
-        "-r", str(ref),
-        "-v", str(vcf),
-        "-m", str(inp.max_node_length),
-    ]
-    if inp.include_alt_paths:
-        args.append("-a")
-
-    # vg construct escribe a stdout; redirigimos
-    with out_vg.open("wb") as out_f:
-        result = runtime.run("vg", args, stdout=out_f, stderr=subprocess.PIPE)
-
-    # vg construct devuelve un .vg; ahora indexamos
-    out_xg = out_vg.with_suffix(".xg")
-    index_args = ["index", "-x", str(out_xg), "-L", str(out_vg)]
-    runtime.run("vg", index_args)
-
-    # Índices de giraffe (gbz, minimizadores, distancias) con el mismo VCF:
-    # necesarios para alinear y proyectar lecturas a la referencia lineal.
+    # Un único grafo para todo: vg autoindex construye el grafo (referencia + VCF) y los
+    # índices de giraffe; el .vg y el .xg se derivan del mismo GBZ. Así giraffe, la
+    # proyección a BAM, vg pack y vg call usan la misma numeración de nodos.
+    # (include_alt_paths y max_node_length ya no se usan: autoindex fija la construcción.)
     vcf_gz = vcf
     if not str(vcf).endswith(".gz"):
         vcf_gz = out_vg.with_suffix(".cohort.vcf.gz")
@@ -108,8 +91,13 @@ def build_local_graph(
     tmp = out_vg.parent / f".{out_vg.stem}_tmp"
     tmp.mkdir(exist_ok=True)
     runtime.run("vg", ["autoindex", "--workflow", "giraffe", "-r", str(ref), "-v", str(vcf_gz),
-                       "-p", str(prefix), "-T", str(tmp)])
+                       "-p", str(prefix), "-T", str(tmp)], stderr=subprocess.PIPE)
     gbz = Path(f"{prefix}.giraffe.gbz")
+    out_xg = out_vg.with_suffix(".xg")
+    with out_xg.open("wb") as f:
+        runtime.run("vg", ["convert", "-x", str(gbz)], stdout=f, stderr=subprocess.PIPE)
+    with out_vg.open("wb") as f:
+        runtime.run("vg", ["convert", "-p", str(gbz)], stdout=f, stderr=subprocess.PIPE)
 
     # Contar nodos y edges con vg stats -z (devuelve dos líneas: nodes/edges)
     nodes, edges = 0, 0

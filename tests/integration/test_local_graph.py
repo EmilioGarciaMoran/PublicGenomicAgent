@@ -144,6 +144,7 @@ def test_call_from_graph_produces_vcf(workdir: dict) -> None:
     ))
     vcf = workdir["tmp"] / "c2.vcf.gz"
     result = call_from_graph(runtime, CallFromGraphInput(
+        method="graph_genotype",  # genotipa sitios del grafo (la variante está en la cohorte)
         graph_vg=out_vg,
         graph_xg=out_vg.with_suffix(".xg"),
         pack=pack,
@@ -176,6 +177,7 @@ def test_call_from_graph_detects_target_variant(workdir: dict) -> None:
     ))
     vcf = workdir["tmp"] / "c2.vcf.gz"
     call_from_graph(runtime, CallFromGraphInput(
+        method="graph_genotype",  # genotipa sitios del grafo (la variante está en la cohorte)
         graph_vg=out_vg,
         graph_xg=out_vg.with_suffix(".xg"),
         pack=pack,
