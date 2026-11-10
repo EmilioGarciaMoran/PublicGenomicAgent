@@ -14,6 +14,8 @@ No external dependencies. No Jinja. Inline CSS only.
 """
 from __future__ import annotations
 
+import re
+
 import html as _html
 import json
 from datetime import datetime, timezone
@@ -537,8 +539,18 @@ def _render_viewer(data: dict, workdir: Path, include_reads: bool) -> str:
             + (f"<p>Candidates:</p><ul>{hl}</ul>" if hl else "") + html)
 
 
+_ABS_PATH = re.compile(r"(?:file://|(?<![\w.:/]))(?:/[^\s<>\"'&/]+)+/([^\s<>\"'&/]+)")
+
+
+def redact_absolute_paths(document: str) -> str:
+    """Rutas absolutas -> nombre de fichero, salvo dentro de los <script> (visor)."""
+    parts = re.split(r"(<script\b.*?</script>)", document, flags=re.S)
+    return "".join(p if p.startswith("<script") else _ABS_PATH.sub(r"\1", p) for p in parts)
+
+
 def render_session_report(session_json: Path | str, output_html: Path | str,
-                          viewer: str = "jbrowse", include_reads: bool = True) -> Path:
+                          viewer: str = "jbrowse", include_reads: bool = True,
+                          redact_paths: bool = False) -> Path:
     """Render a session.json into a self-contained HTML report.
 
     Returns the path to the written HTML file.
@@ -640,6 +652,8 @@ def render_session_report(session_json: Path | str, output_html: Path | str,
     )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    if redact_paths:
+        document = redact_absolute_paths(document)
     output_path.write_text(document, encoding="utf-8")
     return output_path
 

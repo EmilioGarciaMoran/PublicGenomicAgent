@@ -1084,6 +1084,10 @@ def report(
         False, "--no-reads",
         help="No incrustar lecturas (BAM) en el visor: solo genotipos y referencia",
     ),
+    redact_paths: bool = typer.Option(
+        False, "--redact-paths",
+        help="Sustituir rutas absolutas por el nombre del fichero (para compartir el informe)",
+    ),
 ) -> None:
     """Genera un informe HTML autocontenido a partir de un session.json."""
     from publicgenomicagent.agent.report import render_session_report
@@ -1098,7 +1102,8 @@ def report(
             console.print("[red]--viewer debe ser jbrowse o none[/red]")
             raise typer.Exit(code=2)
         out_path = render_session_report(src_path, Path(out), viewer=viewer,
-                                         include_reads=not no_reads)
+                                         include_reads=not no_reads,
+                                         redact_paths=redact_paths)
     except Exception as e:  # noqa: BLE001
         console.print(f"[red]ERROR[/red] {type(e).__name__}: {e}")
         raise typer.Exit(code=1)

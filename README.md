@@ -1,30 +1,90 @@
 # PublicGenomicAgent
 
-**A privacy-first, auditable genomic workflow prototype for clinical research.**
+**A local, auditable workflow for analysing families with rare Mendelian
+disease, designed for consanguineous populations. Research use only.**
 
-Given a clinical phenotype, a family structure, and pre-aligned BAMs,
-PublicGenomicAgent analyzes only the relevant regions of interest (ROIs)
-and returns a prioritized variant report — with Mendelian statistics,
-local pangenomization, and a fully auditable execution trace.
+Input: a confirmed pedigree (PED), one pre-aligned BAM per sequenced
+individual (gene panel or exome) and, optionally, the phenotype as HPO
+terms. Output: candidate variants that segregate with the disease in the
+family, a self-contained HTML report and a `session.json` audit trail
+with SHA-256 hashes of every step.
 
-Designed for modest hardware: laptops, external drives, no cluster.
-Air-gapped by default: local LLM, no external calls. Optional external
-providers under explicit consent.
+Guiding principle: **verify, then analyse, then display.** Nothing is
+analysed until the data pass quality control and the declared family
+relationships are checked against the genotypes. The system presents
+evidence; it does not make the diagnosis.
+
+Runs on a laptop: only the regions of interest are read.
 
 ---
 
-## What this is
+## Family workflow (current focus)
 
-PublicGenomicAgent is **not a pipeline**. A pipeline produces files.
-This system produces *decisions*.
+```bash
+pga run-family --ped family.ped \
+    --bam FA=father.bam --bam MO=mother.bam --bam P1=p1.bam --bam P2=p2.bam --bam S1=s1.bam \
+    --reference GRCh38.fa --region chr22:42123940-42133941 --proband P1 \
+    --relatedness-sites sites.tsv --max-af 0.01
+pga report results/family.session.json --out report.html
+```
 
-- **Input**: a pre-aligned BAM + a clinical query (phenotype, family,
-  diagnostic suspicion) + optionally free-text clinical notes.
-- **Output**: a quantified decision over candidate variants, with
-  Mendelian segregation, local pangenomization, and complete
-  traceability.
+What happens, in order:
 
-The VCF is the intermediate language. The decision is the product.
+1. **Per-sample QC gate** (blocking): sample name, reference contig
+   names and lengths, read counts.
+2. **Family verification** (blocking): IBS0 / IBS2 / relatedness computed
+   locally at a fixed panel of common SNVs and compared with the kinship
+   expected from the PED, including consanguinity loops. Parent–child
+   pairs use a binomial test on IBS0. With fewer than ~200 informative
+   sites the result is "not verifiable", never "passed"; continuing then
+   requires a recorded human override (`--allow-unverified-relatedness`).
+   Calibration on GIAB exomes: [`docs/relatedness_calibration.md`](docs/relatedness_calibration.md).
+3. **Joint calling** of all sequenced members (bcftools).
+4. **Rare-variant filter** (`--max-af`): gnomAD v4 allele frequency,
+   global and Middle Eastern. This is the only step that uses the
+   network: it sends the coordinates of the region (not genotypes or
+   reads) to the public gnomAD API and caches the answer locally. A
+   variant whose REF allele differs from gnomAD is flagged
+   (`PGA_REF_MISMATCH`), not counted as rare.
+5. **Segregation in families of any size**: autosomal recessive
+   homozygous, and compound heterozygous with phase from the parents or
+   from an informative unaffected sibling. Relatives in the PED without
+   a BAM (e.g. grandparents closing a consanguinity loop) still count
+   for kinship.
+6. **Prioritisation** and an **HTML report**: data verification first,
+   then analysis, then an embedded JBrowse 2 viewer (family genotypes as
+   rows in PED order, reads per sample) that opens without network.
+   `--no-reads` leaves the reads out; a report with reads contains
+   individual genomic data and should be shared only for synthetic
+   cases or through a controlled channel.
+
+### Realistic synthetic test case (E2)
+
+`scripts/make_e2_case.py` builds a consanguineous family (11 individuals
+in the PED, 5 sequenced, 2 affected) on the real GRCh38 sequence of
+CYP2D6, with background variants drawn from real gnomAD v4 frequencies
+and one seeded rare recessive variant. Measured on 2026-11-08:
+
+- 8,743 gnomAD SNVs in the region with matching REF, 0 discordant;
+- 28 common variants removed by `--max-af 0.01`;
+- 1 recessive candidate left, the seeded one (`chr22:42129004 C>A`,
+  gnomAD AF 6.9e-7), ranked first.
+
+This is a synthetic family. It shows that the steps work together on
+real reference sequence and real population frequencies; it is not a
+clinical validation.
+
+### Known limits
+
+- Family verification was calibrated on chromosomes 21–22 of GIAB
+  exomes (GRCh37) with a 1000 Genomes panel; a panel with Middle Eastern
+  frequencies is still to be built.
+- Tested with gene panels and single regions; exome-wide runs with
+  many regions and autozygosity mapping are the next step.
+- Not a substitute for the variant calling of a sequencing service, and
+  not a certified clinical product.
+
+---
 
 ## Design principle: manifest-first
 
@@ -158,16 +218,18 @@ For a longer walkthrough, see [`docs/quickstart.md`](docs/quickstart.md).
 
 ## Tools
 
-17 tools registered in `TOOL_REGISTRY`, all with Pydantic input/output
+19 tools registered in `TOOL_REGISTRY`, all with Pydantic input/output
 and deterministic execution:
 
 | Tool | Description | Runtime |
 |---|---|---|
 | `fetch_roi` | Slice an indexed BAM by genomic region | yes |
 | `qc_bam` | Structural QC: header, index, sort order, samples, counts | yes |
+| `verify_relatedness` | Local IBS check of declared family relationships against the PED | yes |
+| `annotate_frequency` | gnomAD v4 allele frequencies (global, Middle Eastern) with local cache | no |
 | `call_variants` | Single-sample variant calling (bcftools mpileup+call) | yes |
 | `joint_call` | Multi-sample variant calling for families | yes |
-| `mendelian_filter` | De novo / recessive homozygous / dominant / X-linked | no |
+| `mendelian_filter` | De novo / recessive homozygous / compound het / dominant / X-linked; families of any size | no |
 | `plink_validate` | PLINK-based family QC (Mendel errors, IBD) | no |
 | `compare_vcfs` | Diff two VCFs with sensitivity/precision metrics | no |
 | `local_pangenome` | Enrich a local reference with cohort alleles | no |
@@ -321,8 +383,11 @@ Loop: 12 iteraciones
   OK prioritize_variants
 ```
 
-Result: one recessive candidate at `chr22:42128941 A>T` with the
-expected genotypes (`father 0/1`, `mother 0/1`, `proband 1/1`).
+Result: one recessive candidate with the expected genotypes
+(`father 0/1`, `mother 0/1`, `proband 1/1`). Note: Sandbox uses a
+synthetic reference, so the REF base it reports (`A` at 22:42128941)
+differs from GRCh38 (`C`); for real-reference results see the E2 case
+above.
 
 The full pipeline is covered by
 `tests/integration/test_sandbox_run.py`.
@@ -357,7 +422,7 @@ Reproducible demos:
 
 ## Status
 
-**Active development. 17 tools, 6 isolated environments; unit and integration test suites run in CI.**
+**Active development. 19 tools, 6 isolated environments; unit tests and an end-to-end smoke test run in CI.**
 
 - Genomic layer (no GPU): complete and tested end-to-end.
 - NL → CaseManifest extraction: functional with local LLM
