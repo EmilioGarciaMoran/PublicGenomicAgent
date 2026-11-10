@@ -408,6 +408,7 @@ Usage guides:
 - [`docs/installation.md`](docs/installation.md) — detailed setup and troubleshooting.
 - [`docs/quickstart.md`](docs/quickstart.md) — end-to-end walkthrough.
 - [`docs/use_cases.md`](docs/use_cases.md) — four clinical scenarios.
+- [`docs/facts_sheet.md`](docs/facts_sheet.md) — **verified facts with dates and commands to reproduce them**.
 - [`docs/pitch.md`](docs/pitch.md) — **formal project pitch** (3 pillars, benchmarks, roadmap).
 - [`docs/privacy.md`](docs/privacy.md) — privacy policy.
 - [`docs/known_issues.md`](docs/known_issues.md) — known issues (BAQ, etc.).
