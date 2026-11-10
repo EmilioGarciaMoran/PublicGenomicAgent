@@ -25,6 +25,8 @@ prioritisation → self-contained HTML report. Research use only.
 | E2 synthetic family on real GRCh38 (CYP2D6) | 8,743 gnomAD SNVs with matching REF, 0 discordant | 2026-11-08 | `scripts/make_e2_case.py --workdir DIR` |
 | E2 rare-variant filter (`--max-af 0.01`) | 28 common variants removed | 2026-11-08 | same |
 | E2 result | 1 recessive candidate, the seeded one (chr22:42129004 C>A, gnomAD AF 6.9e-7), ranked 1 | 2026-11-08 | same |
+| Local pangenome vs linear, divergent haplotype (~4 % / ~8 %), 10 seeds | linear called 6/10 (1/10 at MAPQ ≥ 20) / 0/10; local pangenome 10/10 / 10/10; no difference at 1–2 % | 2026-11-10 | `scripts/benchmark_local_pangenome.py --sweep`; [`benchmark_local_pangenome.md`](benchmark_local_pangenome.md) |
+| Local pangenome vs linear, segmental duplication, 10 seeds | neither calls the variant reliably (≤ 1/10, never at MAPQ ≥ 20) | 2026-11-10 | same |
 | Report opens without network | 0 external requests, 0 JavaScript errors in Chromium with all network blocked | 2026-11-08 | `pytest tests/integration/test_report_viewer.py` |
 
 ## Network and data
@@ -47,11 +49,9 @@ prioritisation → self-contained HTML report. Research use only.
   not measured. A panel with Middle Eastern frequencies has not been built.
 - Tested on gene panels and single regions. Exome-wide runs with many
   regions and autozygosity mapping are not done yet.
-- The local-pangenome benchmark on a synthetic segmental duplication
-  (`benchmark_duplications.md`) cannot be reproduced from the repository
-  yet: its generator script and demo module are not versioned. It is not
-  cited as a result until it is rebuilt with a versioned script, a test,
-  and a graph built without the target variant.
+- The local-pangenome benchmark is synthetic (reference, reads and a
+  cohort VCF that contains exactly the sample's alleles). It has not been
+  tested on real data or on structural variants.
 - E2 is a simulated family on real reference sequence and real
   population frequencies. It shows that the steps work together; it is
   not a clinical validation.

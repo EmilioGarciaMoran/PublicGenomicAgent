@@ -334,27 +334,26 @@ but does not add new variants.
 
 Full report: [`docs/benchmark_linear_vs_pangenome.md`](docs/benchmark_linear_vs_pangenome.md)
 
-### Benchmark B — Linear vs pangenome (with segmental duplication)
+### Benchmark B — Linear vs local pangenome (synthetic, 10 seeds)
 
-**Data**: synthetic reference with a tandem duplication of 100 bp.
-**Reads**: 50 reads covering the duplicated region, all carrying
-the variant `chr1:1050 T>G` (hom alt), all with **MAPQ=0**
-(simulating alignment ambiguity).
+Same reads, same aligner (`vg giraffe`, reads projected to the linear
+reference) and same caller (bcftools); only the graph differs, and it
+never contains the target variant.
 
-| Pipeline | Variants detected | Genotype |
+| Scenario | Linear: called (MAPQ ≥ 20) | Local pangenome: called (MAPQ ≥ 20) |
 |---|---|---|
-| Linear (default) | 0 | — |
-| Linear (no MAPQ filter) | 0 | — |
-| **Local pangenome (vg)** | **1** | **1/1, DP=49, GQ=132** |
+| Unique region | 10/10 (10/10) | 10/10 (10/10) |
+| Haplotype ~1–2 % divergent | 10/10 (10/10) | 10/10 (10/10) |
+| Haplotype ~4 % divergent | 6/10 (1/10) | 10/10 (10/10) |
+| Haplotype ~8 % divergent | 0/10 (0/10) | 10/10 (10/10) |
+| Segmental duplication | ≤ 1/10 (0/10) | ≤ 1/10 (0/10) |
 
-**Conclusion**: in regions with segmental duplications, the
-linear pipeline loses the pathogenic variant. The pangenome
-recovers it with high confidence.
+Full report: [`docs/benchmark_local_pangenome.md`](docs/benchmark_local_pangenome.md)
+(replaces an earlier, non-reproducible duplication benchmark).
 
-Full report: [`docs/benchmark_duplications.md`](docs/benchmark_duplications.md)
-
-**Bottom line**: the pangenome is not always better; it is
-decisive where it matters (SDs, LCRs) and neutral elsewhere.
+**Bottom line**: a local pangenome helps in regions that diverge
+strongly from the reference, is neutral elsewhere, and does not by
+itself solve segmental duplications with short reads.
 
 ## Sandbox integration
 
