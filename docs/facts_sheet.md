@@ -47,6 +47,11 @@ prioritisation → self-contained HTML report. Research use only.
   not measured. A panel with Middle Eastern frequencies has not been built.
 - Tested on gene panels and single regions. Exome-wide runs with many
   regions and autozygosity mapping are not done yet.
+- The local-pangenome benchmark on a synthetic segmental duplication
+  (`benchmark_duplications.md`) cannot be reproduced from the repository
+  yet: its generator script and demo module are not versioned. It is not
+  cited as a result until it is rebuilt with a versioned script, a test,
+  and a graph built without the target variant.
 - E2 is a simulated family on real reference sequence and real
   population frequencies. It shows that the steps work together; it is
   not a clinical validation.
