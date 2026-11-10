@@ -18,7 +18,7 @@ prioritisation → self-contained HTML report. Research use only.
 | Claim | Value | Date | How to reproduce |
 |---|---|---|---|
 | Unit tests in a clean environment (as GitHub CI) | 257 passed, 5 skipped | 2026-11-10 | `pytest tests/unit -q` |
-| Unit + integration tests on the author's laptop | 262 unit + 43 integration passed (before E3) | 2026-11-08 | `pytest tests -q` |
+| Unit + integration tests on the author's laptop | 315 passed, 1 skipped, 1 expected failure (documented `graph_genotype` bias) | 2026-11-10 | `pytest tests -q` |
 | Family verification, true trio (GIAB HG002/3/4 exomes, chr21–22) | never fails; 98.6 % passed, 1.4 % warning at 200 sites; 100 % passed at ≥ 500 | 2026-10-31 | `scripts/calibrate_relatedness_giab.py`; [`relatedness_calibration.md`](relatedness_calibration.md) |
 | Family verification, false father (HG005 declared father of HG002) | never passes; 100 % failed at ≥ 150 sites | 2026-10-31 | same |
 | Below ~200 informative sites | "not verifiable", never "passed" | 2026-10-31 | same |
