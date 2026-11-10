@@ -241,7 +241,8 @@ def call_from_graph(
     mejor, no de que el grafo contenga la respuesta (docs/benchmark_local_pangenome.md).
 
     method="graph_genotype": vg call sobre el pack. Solo genotipa sitios que ya están
-    en el grafo (alelos de la cohorte); NO descubre variantes nuevas.
+    en el grafo (alelos de la cohorte); NO descubre variantes nuevas. Con un VCF de
+    cohorte sin fase puede sesgar genotipos heterocigotos hacia 1/1.
     """
     vcf = Path(inp.output_vcf).expanduser().resolve()
     vcf.parent.mkdir(parents=True, exist_ok=True)

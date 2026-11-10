@@ -121,6 +121,13 @@ genotypes sites already in the graph.
 the divergent scenario: the surject path finds the novel variant, the
 graph-genotype path does not.
 
+Known limit of `graph_genotype`: with an unphased cohort VCF, `vg autoindex`
+builds artificial haplotypes (a greedy path cover). In `test_local_graph.py`
+(NPHP1 cohort with synthetic Middle Eastern alleles), `vg call` reported a
+heterozygous variant as 1/1 (AD 2,30); the surject path gives 0/1. In
+heterozygous synthetic samples, with cohort alleles split across both
+haplotypes, the surject path gave correct 0/1 genotypes.
+
 ## Reproduce
 
 ```bash
