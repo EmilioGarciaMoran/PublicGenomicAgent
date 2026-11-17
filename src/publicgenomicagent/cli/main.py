@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from pathlib import Path
 
 import typer
@@ -903,6 +905,11 @@ def run_family(
         help="Filtro de rareza: descarta variantes con frecuencia gnomAD v4 (global u "
              "Oriente Medio) mayor que este valor, p.ej. 0.01. Anota frecuencias antes.",
     ),
+    hpo: str = typer.Option(
+        None, "--hpo",
+        help="Fenotipo del probando: HPO separados por coma (p.ej. HP:0000090,HP:0000083). "
+             "Activa LIRICAL y el cruce fenotipo × genotipo en el informe.",
+    ),
 ) -> None:
     """Analiza una familia de cualquier tamaño a partir de un PED y un BAM por individuo.
 
@@ -950,6 +957,14 @@ def run_family(
     if state.case.proband not in bams:
         console.print(f"[red]El probando {state.case.proband} no tiene BAM[/red]")
         raise typer.Exit(code=2)
+    if hpo:
+        ids = [h.strip() for h in hpo.split(",") if h.strip()]
+        bad = [h for h in ids if not re.fullmatch(r"HP:\d{7}", h)]
+        if bad:
+            console.print(f"[red]--hpo: términos no válidos {bad} (formato HP:0000000)[/red]")
+            raise typer.Exit(code=2)
+        state.case.hpo_terms[state.case.proband] = ids
+        state.note(f"fenotipo del probando: {len(ids)} términos HPO")
 
     if planner_kind == "rule":
         planner = RuleBasedPlanner()

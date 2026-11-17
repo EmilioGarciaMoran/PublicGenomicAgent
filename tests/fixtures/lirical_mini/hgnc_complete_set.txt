@@ -1,0 +1,5 @@
+hgnc_id	symbol	entrez_id	prev_symbol	alias_symbol
+HGNC:7905	NPHP1	4867	"OLDNPHP|SLSN1"	
+HGNC:19104	NPHP4	261734		
+HGNC:1	GENEX	999001		
+HGNC:2	TMEM67	91147		MKS3

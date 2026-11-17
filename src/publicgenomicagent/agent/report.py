@@ -518,6 +518,55 @@ def _render_comp_het(outputs: dict) -> str:
             f"<th>Phase evidence</th></tr></thead><tbody>{''.join(rows)}</tbody></table>{more}")
 
 
+def _family_candidates(outputs: dict) -> list[dict]:
+    rep = _mendelian_report(outputs)
+    out = [{"gene": c.get("gene"), "model": "recessive homozygous", "variant": c["variant"]}
+           for c in rep.get("auto_rec_hom_candidates") or []]
+    for p in rep.get("comp_het_pairs") or []:
+        v = " + ".join(" ".join(p[k].split("\t")[i] for i in (0, 1, 3, 4)) for k in ("v1", "v2"))
+        out.append({"gene": p.get("gene"), "model": f"compound het ({p.get('phase')})", "variant": v})
+    return out
+
+
+def _render_concordance(data: dict) -> str:
+    outputs = data.get("outputs") or {}
+    pr = outputs.get("phenotype_ranking") or {}
+    if not pr.get("ranking_tsv"):
+        return '<p class="empty">No phenotype given (run with <code>--hpo</code>).</p>'
+    cands = _family_candidates(outputs)
+    try:
+        from ..knowledge.disease_genes import concordance, load_disease_genes, read_lirical_tsv
+        dg = load_disease_genes(Path(pr["data_dir"]))
+        res = concordance(cands, read_lirical_tsv(Path(pr["ranking_tsv"])), dg)
+    except Exception as e:  # noqa: BLE001
+        return f'<p class="empty">Concordance not available: {_e(type(e).__name__)}: {_e(str(e))}</p>'
+    n = res["n_ranked_diseases"]
+    rows = []
+    for c in res["candidates"]:
+        b = c["best_disease"]
+        if b:
+            tie = f" (tied with {b['tied_with']})" if b["tied_with"] else ""
+            dis = (f"{_e(b['disease_name'])} <code>{_e(b['disease_curie'])}</code>",
+                   f"{b['rank']} of {n}{tie}", _e(b["posttest_prob"]), _e(b["composite_lr"]))
+        else:
+            why = ("gene label is not an HGNC symbol" if c["gene_status"] == "not_a_gene"
+                   else "no disease of this gene in the ranking")
+            dis = (f'<span class="empty">{why}</span>', "—", "—", "—")
+        rows.append(_row([_e(c["gene_symbol"] or c.get("gene") or "?"), _e(c["model"]),
+                          f"<code>{_e(c['variant'])}</code>", *dis]))
+    table = ("<table><thead><tr><th>Gene</th><th>Model</th><th>Variant(s)</th>"
+             "<th>Best disease of this gene by phenotype</th><th>Rank</th><th>Post-test</th>"
+             f"<th>LR</th></tr></thead><tbody>{''.join(rows)}</tbody></table>"
+             if rows else '<p class="empty">No segregating candidates.</p>')
+    top = "".join(f"<li>{t['rank']}. {_e(t['disease_name'])} <code>{_e(t['disease_curie'])}</code> "
+                  f"— {_e(', '.join(t['genes']))}</li>" for t in res["top_diseases_without_candidate"][:15])
+    return ("<p>Phenotype ranking (LIRICAL, HPO terms only) and family segregation are shown side by "
+            "side; they are not combined into one score. Diseases with the same likelihood ratio are "
+            "tied: the phenotype alone cannot order them.</p>" + table
+            + (f"<h3>Top {res['top_n']} diseases by phenotype with no segregating candidate in their "
+               f"genes</h3><ul>{top}</ul>" if top else ""))
+
+
 def _render_viewer(data: dict, workdir: Path, include_reads: bool) -> str:
     try:
         from .viewer import build_viewspec, render_jbrowse
@@ -599,6 +648,7 @@ def render_session_report(session_json: Path | str, output_html: Path | str,
     body_parts.append(_section("2. Analysis — pipeline executed", _render_tool_calls(tool_calls)))
     body_parts.append(_section("Candidate variants", _render_mendelian_stats(outputs)))
     body_parts.append(_section("Compound heterozygous pairs", _render_comp_het(outputs)))
+    body_parts.append(_section("Phenotype–genotype concordance", _render_concordance(data)))
 
     # Sección extendida: variantes del VCF auto_rec_hom (si existe)
     # Buscamos el VCF en el output de mendelian_filter

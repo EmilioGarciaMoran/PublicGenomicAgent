@@ -508,6 +508,7 @@ class PhenotypeRankingInput(BaseModel):
 
 class PhenotypeRankingOutput(ToolOutput):
     ranking_tsv: Path
+    data_dir: Path | None = None       # datos de LIRICAL (mim2gene_medgen, hgnc) para el cruce con genes
     top_candidates: list[dict] = []
     counts: dict[str, int] = {}
     report_json: Path

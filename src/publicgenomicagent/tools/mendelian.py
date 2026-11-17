@@ -636,6 +636,9 @@ def mendelian_filter(inp: MendelianFilterInput) -> MendelianFilterOutput:
             "comp_het_unphased": len(ch_unk),
         },
         "comp_het_pairs": [{k: v for k, v in p_.items() if k != "lines"} for p_ in ch_pairs],
+        "auto_rec_hom_candidates": [
+            {"variant": " ".join(l_.split("\t")[i] for i in (0, 1, 3, 4)),
+             "gene": _gene_key(l_.split("\t"), inp.regions)} for l_ in rec_lines],
         "comp_het_notes": ch_notes,
         "total_input_variants": len(data),
         "min_dp": inp.min_dp,

@@ -1,0 +1,9 @@
+! LIRICAL TSV Output (v2.4.1)
+! Sample: sample
+rank	diseaseName	diseaseCurie	pretestprob	posttestprob	compositeLR	entrezGeneId	variants
+1	Senior-Loken syndrome 4	OMIM:606996	1/8525	95.45%	5.253		
+2	Nephronophthisis 4	OMIM:606966	1/8525	95.45%	5.253		
+3	COACH syndrome 3	OMIM:619113	1/8525	95.45%	5.253		
+4	Nephronophthisis 1	OMIM:256100	1/8525	95.45%	5.253		
+5	Senior-Loken syndrome 1	OMIM:266900	1/8525	72.40%	4.35		
+6	Unrelated disease	OMIM:111111	1/8525	1.00%	0.1		

@@ -196,6 +196,7 @@ def phenotype_ranking(inp: PhenotypeRankingInput) -> PhenotypeRankingOutput:
     return PhenotypeRankingOutput(
         ok=True,
         tool="phenotype_ranking",
+        data_dir=data_dir,
         message=(
             f"LIRICAL: {total} enfermedades rankeadas, "
             f"top-{len(top_candidates)} incluido en el report"
