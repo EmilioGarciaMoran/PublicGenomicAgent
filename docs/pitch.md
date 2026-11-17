@@ -7,9 +7,10 @@ PublicGenomicAgent completa el análisis genómico end-to-end en un
 portátil de consumo. Sin clúster, sin GPU. Y con el LLM local por
 defecto, sin red: el usuario puede abrir un proveedor externo bajo
 consentimiento explícito, pero el caso de uso principal no lo
-necesita. Cuando el pipeline lineal falla —duplicaciones
-segmentarias— activa pangenoma local dirigido para recuperar las
-variantes patogénicas que se pierden.
+necesita. En regiones muy divergentes de la referencia puede
+alinear contra un pangenoma local dirigido, que en pruebas sintéticas
+recupera variantes que el alineamiento lineal pierde
+([`benchmark_local_pangenome.md`](benchmark_local_pangenome.md)).
 
 ---
 
@@ -111,26 +112,19 @@ comparables. El pangenoma es más conservador (excluye ~20
 artefactos de baja calidad que el lineal sí incluye), pero no
 añade variantes nuevas.
 
-**Benchmark B — duplicación segmentaria sintética (chr1)**:
+**Benchmark B — pangenoma local frente a lineal (sintético, 10 semillas)**:
+mismas lecturas, mismo alineador (vg giraffe) y mismo llamador
+(bcftools); solo cambia el grafo, que nunca contiene la variante
+objetivo. En un haplotipo que difiere de la referencia un ~4 %, el
+lineal llama la variante 6/10 veces (1/10 con MAPQ ≥ 20) y el
+pangenoma 10/10; con ~8 %, 0/10 frente a 10/10; con 1–2 %, sin
+diferencia. En una duplicación segmentaria ninguno de los dos la llama
+de forma fiable. Detalle: [`benchmark_local_pangenome.md`](benchmark_local_pangenome.md),
+que sustituye a un benchmark anterior no reproducible.
 
-Referencia con una duplicación en tándem de 100 bp. BAM del
-proband con 50 reads que cubren la región duplicada, todas
-llevando la variante `chr1:1050 T>G` (hom alt). Todas las reads
-con MAPQ=0 (simulan la ambigüedad de alineamiento).
-
-| Pipeline | Variantes detectadas | Genotipo |
-|---|---|---|
-| Lineal (default) | 0 | — |
-| Lineal (sin filtro MAPQ) | 0 | — |
-| **Pangenoma local (vg)** | **1** | **1/1, DP=49, GQ=132** |
-
-**Conclusión**: en regiones con SDs, el pipeline lineal **pierde
-la variante patogénica**. El pangenoma local la recupera con
-confianza alta. Es una diferencia medida, no teórica.
-
-**El argumento completo**: el pangenoma no es siempre mejor. Es
-**decisivo** en las regiones donde importa (SDs, LCRs) y **neutro**
-en el resto. El sistema lo sabe y lo activa cuando aporta.
+**El argumento completo**: el pangenoma local no es siempre mejor.
+Ayuda en regiones muy divergentes de la referencia, es neutro en el
+resto y no resuelve por sí solo las duplicaciones segmentarias.
 
 ---
 
@@ -389,7 +383,7 @@ Es igual de importante aclarar los límites:
 - [`README.md`](../README.md)
 - [`docs/demo_osteo_real.md`](demo_osteo_real.md) — primer caso real.
 - [`docs/benchmark_linear_vs_pangenome.md`](benchmark_linear_vs_pangenome.md) — benchmark A.
-- [`docs/benchmark_duplications.md`](benchmark_duplications.md) — benchmark B.
+- [`docs/benchmark_local_pangenome.md`](benchmark_local_pangenome.md) — benchmark B (sustituye a `benchmark_duplications.md`).
 - [`docs/privacy.md`](privacy.md) — política de privacidad.
 - [`docs/backlog.md`](backlog.md) — estado del proyecto.
 
@@ -403,8 +397,7 @@ Es igual de importante aclarar los límites:
 > desde la descripción del fenotipo hasta el ranking
 > genotipo-fenotipo, con anotación ClinVar y trazabilidad completa
 > verificable con hashes SHA-256.
-> Cuando el pipeline lineal falla por duplicaciones segmentarias,
-> activa pangenoma local dirigido y recupera las variantes
-> patogénicas que se pierden. Todo local, con privacidad por
+> En regiones muy divergentes de la referencia puede alinear
+> contra un pangenoma local dirigido. Todo local, con privacidad por
 > arquitectura y un LLM que propone, no decide."
 

@@ -194,6 +194,8 @@ def main(argv: list[str] | None = None) -> dict:
     ap.add_argument("--depth", type=int, default=30)
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--max-af", type=float, default=0.01)
+    ap.add_argument("--hpo", help="HPO del probando separados por coma: activa LIRICAL y el cruce "
+                                  "fenotipo × genotipo (p.ej. NPHP1: HP:0000090,HP:0000083,HP:0001903)")
     ap.add_argument("--seq-fasta", type=Path, help="FASTA de la ROI (en vez de UCSC)")
     ap.add_argument("--gnomad-json", type=Path, help="variantes gnomAD (en vez de la API)")
     a = ap.parse_args(argv)
@@ -257,6 +259,8 @@ def main(argv: list[str] | None = None) -> dict:
     args = ["run-family", "--ped", str(work / "family.ped"), "--reference", str(ref),
             "--region", f"{a.chrom}:{a.start}-{a.end}", "--label", a.label,
             "--case-id", "e2", "--proband", "P1", "--max-af", str(a.max_af)]
+    if a.hpo:
+        args += ["--hpo", a.hpo]
     for s, b in bams.items():
         args += ["--bam", f"{s}={b}"]
     try:
@@ -290,6 +294,19 @@ def main(argv: list[str] | None = None) -> dict:
     passed = (in_rec and rep["rarity_filter"]["removed_common"] > 0
               and rep["counts"]["auto_rec_hom"] <= 5 and not freq.get("n_ref_mismatch"))
     result["E2_passed"] = passed
+    conc_line = None
+    pr = (calls.get("phenotype_ranking") or {}).get("output") or {}
+    if pr.get("ranking_tsv"):
+        from publicgenomicagent.knowledge.disease_genes import (concordance, load_disease_genes,
+                                                                read_lirical_tsv)
+        c = concordance([{"gene": a.label, "model": "recessive homozygous", "variant": "seeded"}],
+                        read_lirical_tsv(Path(pr["ranking_tsv"])), load_disease_genes(Path(pr["data_dir"])))
+        b = c["candidates"][0]["best_disease"]
+        result["phenotype_best_disease_for_gene"] = b
+        conc_line = (f"- Fenotipo × genotipo: gen {a.label} -> " + (
+            f"{b['disease_name']} ({b['disease_curie']}), puesto {b['rank']} de "
+            f"{c['n_ranked_diseases']} por fenotipo (empatada con {b['tied_with']}), post-test {b['posttest_prob']}"
+            if b else "ninguna enfermedad de este gen en el ranking de LIRICAL"))
     md = ["# E2: caso realista (GRCh38 real, variante recesiva sembrada)", "",
           f"- ROI: {a.chrom}:{a.start}-{a.end} ({a.label}); referencia GRCh38 real (UCSC) en la ROI",
           f"- SNV de gnomAD simuladas: {len(sites)} (de ellas comunes > {a.max_af}: "
@@ -301,6 +318,7 @@ def main(argv: list[str] | None = None) -> dict:
           f"(sembrada incluida: {'sí' if in_rec else 'NO'}); posición en la priorización: {rank}",
           f"- Heterocigoto compuesto: {rep['counts']['comp_het']} en trans, "
           f"{rep['counts']['comp_het_unphased']} sin fase",
+          *([conc_line] if conc_line else []),
           f"- **E2 {'superado' if passed else 'NO superado'}**", ""]
     (work / "e2_report.md").write_text("\n".join(md))
     print("\n".join(md))

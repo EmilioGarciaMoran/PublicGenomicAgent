@@ -1,3 +1,5 @@
+> **Superseded (2026-11-10).** This result could not be reproduced from the repository and was probably circular (`vg call` genotypes sites already in the graph; MAPQ set by hand). See [`benchmark_local_pangenome.md`](benchmark_local_pangenome.md) for a fair, reproducible benchmark.
+
 # Benchmark: segmental duplication (synthetic)
 
 Proof that the linear pipeline loses pathogenic variants

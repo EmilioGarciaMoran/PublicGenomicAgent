@@ -38,3 +38,12 @@ def test_viewspec_falls_back_to_roi_and_none_when_empty(tmp_path):
     assert (vs.start, vs.end) == (100, 2000) and vs.highlights == []
     s["case"]["candidate_rois"] = []
     assert build_viewspec(s) is None
+
+
+def test_redact_absolute_paths_keeps_basenames_and_scripts():
+    from publicgenomicagent.agent.report import redact_absolute_paths
+    doc = ('<td>/home/egarmo/pga_e2/results/e2.vcf.gz</td><a href="file:///home/u/x.bam">x</a>'
+           ' 2/3 sites <script>var p="/home/keep/me.js"</script>')
+    out = redact_absolute_paths(doc)
+    assert "/home/egarmo" not in out and "<td>e2.vcf.gz</td>" in out
+    assert "/home/u/" not in out and "2/3 sites" in out and "/home/keep/me.js" in out

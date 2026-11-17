@@ -1,0 +1,8 @@
+#MIM number	GeneID	type	Source	MedGenCUI	Comment
+607100	4867	gene	-	-	-
+256100	4867	phenotype	GeneMap	C1	-
+266900	4867	phenotype	GeneMap	C2	-
+606966	261734	phenotype	GeneMap	C3	-
+606996	261734	phenotype	GeneMap	C4	-
+619113	91147	phenotype	GeneMap	C5	-
+999999	-	phenotype	-	C6	-

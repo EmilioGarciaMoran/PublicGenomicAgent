@@ -63,7 +63,10 @@ def _build_command(
 ) -> list[str]:
     """Construye el comando java para LIRICAL prioritize."""
     cmd = [
-        inp.java_bin, "-jar", str(jar), "prioritize",
+        # Formato numérico fijo (punto decimal) sea cual sea el idioma del sistema:
+        # con LANG=es, Java escribe "5,253" y un lector en inglés lee cinco mil.
+        inp.java_bin, "-Duser.language=en", "-Duser.country=US",
+        "-jar", str(jar), "prioritize",
         "-p", ",".join(inp.hpo_ids),
         "-d", str(data_dir),
         "-x", prefix,
@@ -193,6 +196,7 @@ def phenotype_ranking(inp: PhenotypeRankingInput) -> PhenotypeRankingOutput:
     return PhenotypeRankingOutput(
         ok=True,
         tool="phenotype_ranking",
+        data_dir=data_dir,
         message=(
             f"LIRICAL: {total} enfermedades rankeadas, "
             f"top-{len(top_candidates)} incluido en el report"

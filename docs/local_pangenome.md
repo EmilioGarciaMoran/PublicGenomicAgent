@@ -1,3 +1,5 @@
+> **Update 2026-11-10.** Variant calling after graph alignment now defaults to bcftools on reads projected to the linear reference (`call_from_graph --method surject`), which can discover new variants. `vg call` (`--method graph_genotype`) only genotypes sites already in the graph. See [`benchmark_local_pangenome.md`](benchmark_local_pangenome.md).
+
 # Pangenomización local del ROI
 
 Este documento describe el diseño de `local_pangenome`, la pieza central

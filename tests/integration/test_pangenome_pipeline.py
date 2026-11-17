@@ -168,6 +168,7 @@ def test_pangenome_pipeline_end_to_end(
 
     call_vcf = tmp_path / "calls.vcf.gz"
     call_inp = CallFromGraphInput(
+        method="graph_genotype",  # genotipa los sitios del grafo (comportamiento previo)
         graph_vg=build_out.graph_vg,
         graph_xg=build_out.graph_xg,
         pack=pack,

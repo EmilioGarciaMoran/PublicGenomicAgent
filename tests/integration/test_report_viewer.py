@@ -86,3 +86,12 @@ def test_viewer_renders_offline_in_browser(session, tmp_path):
         b.close()
     assert external == [] and errors == []
     assert "Family genotypes" in text and "P1 (reads)" in text
+
+
+def test_report_redact_paths(session, tmp_path):
+    import re
+    root = str(session.parents[1])
+    html = _report(session, tmp_path / "s.html", "--redact-paths")
+    outside_scripts = re.sub(r"<script\b.*?</script>", "", html, flags=re.S)
+    assert root in _report(session, tmp_path / "u.html", "--viewer", "none")
+    assert root not in outside_scripts and "vcf.gz" in outside_scripts

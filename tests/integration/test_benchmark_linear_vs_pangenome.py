@@ -122,6 +122,7 @@ def test_linear_and_pangenome_both_produce_variants(demo_trio, tmp_path):
     call_out = call_from_graph(
         runtime,
         CallFromGraphInput(
+            method="graph_genotype",  # genotipa los sitios del grafo (comportamiento previo)
             graph_vg=graph_out.graph_vg,
             graph_xg=graph_out.graph_xg,
             pack=align_out.pack,
