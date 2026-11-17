@@ -71,6 +71,6 @@ def test_run_family_hpo_concordance_in_report(tmp_path, monkeypatch):
     assert rr.exit_code == 0, rr.output
     html = out.read_text()
     sec = html.split("Phenotype–genotype concordance", 1)[1]
-    assert "Nephronophthisis 1" in sec and "OMIM:256100" in sec and "4 of 6 (tied with 3)" in sec
+    assert "Nephronophthisis 1" in sec and "OMIM:256100" in sec and "4 of 8525 (tied with 3)" in sec
     assert "not combined into one score" in sec
     assert "NPHP4" in sec          # enfermedad bien situada sin candidata en su gen

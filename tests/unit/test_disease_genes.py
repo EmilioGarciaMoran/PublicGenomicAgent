@@ -31,4 +31,5 @@ def test_concordance_side_by_side_with_ties():
     status = {c["gene"]: c["gene_status"] for c in res["candidates"]}
     assert status == {"OLDNPHP": "ranked", "GENSIM": "not_a_gene", "GENEX": "no_ranked_disease"}
     without = {t["disease_curie"]: t["genes"] for t in res["top_diseases_without_candidate"]}
+    assert res["n_ranked_diseases"] == 8525          # de pretestprob 1/8525, no las 6 filas del TSV
     assert without == {"OMIM:606996": ["NPHP4"], "OMIM:606966": ["NPHP4"], "OMIM:619113": ["TMEM67"]}

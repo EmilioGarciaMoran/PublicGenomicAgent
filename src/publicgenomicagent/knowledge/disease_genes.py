@@ -65,7 +65,8 @@ def read_lirical_tsv(path: Path) -> list[dict]:
         lines = [l for l in f if not l.startswith("!")]
     for row in csv.DictReader(lines, delimiter="\t"):
         try:
-            rows.append({"rank": int(row["rank"]), "disease_name": row.get("diseaseName", ""),
+            rows.append({"rank": int(row["rank"]), "pretest_prob": row.get("pretestprob", ""),
+                         "disease_name": row.get("diseaseName", ""),
                          "disease_curie": row.get("diseaseCurie", ""),
                          "posttest_prob": row.get("posttestprob", ""),
                          "composite_lr": row.get("compositeLR", "")})
@@ -104,4 +105,14 @@ def concordance(candidates: list[dict], ranking: list[dict], dg: DiseaseGenes,
         if missing:
             top_without.append({**r, "genes": missing})
     return {"candidates": rows, "top_diseases_without_candidate": top_without, "top_n": top_n,
-            "n_ranked_diseases": len(ranking)}
+            "n_ranked_diseases": n_ranked(ranking)}
+
+
+def n_ranked(ranking: list[dict]) -> int:
+    """Enfermedades evaluadas por LIRICAL. El TSV puede traer solo las primeras
+    filas; el total sale de la probabilidad pre-test (1/N, igual para todas)."""
+    for r in ranking:
+        num, sep, den = str(r.get("pretest_prob", "")).partition("/")
+        if sep and num.strip() == "1" and den.strip().isdigit():
+            return int(den)
+    return len(ranking)
