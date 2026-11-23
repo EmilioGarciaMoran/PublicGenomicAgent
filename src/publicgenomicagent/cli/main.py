@@ -877,9 +877,12 @@ def run_trio(
 
 @app.command("run-family")
 def run_family(
-    ped: str = typer.Option(..., "--ped", help="PED confirmado de la familia (FID IID PID MID SEX PHENO)"),
+    ped: str = typer.Option(None, "--ped", help="PED confirmado de la familia (FID IID PID MID SEX PHENO)"),
+    family: str = typer.Option(None, "--family",
+                               help="Tabla familiar aprobada (pga family approve); alternativa a --ped. "
+                                    "Los BAM y el probando se toman de la tabla si no se dan."),
     bam: list[str] = typer.Option(
-        ..., "--bam",
+        None, "--bam",
         help="BAM de un individuo del PED como ID=ruta. Repetible: --bam P1=p1.bam --bam P2=p2.bam",
     ),
     reference: str = typer.Option(..., "--reference", "-f", help="FASTA de referencia"),
@@ -921,6 +924,25 @@ def run_family(
     from publicgenomicagent.agent.state import AgentState, SessionContext
     from publicgenomicagent.tools.base import CaseManifest, GenomicRange
 
+    if bool(ped) == bool(family):
+        console.print("[red]Indique --ped o --family (uno de los dos)[/red]")
+        raise typer.Exit(code=2)
+    family_rec = None
+    if family:
+        from publicgenomicagent.tools.family_table import check_approval, load_family_table, ped_path
+        try:
+            family_rec = check_approval(Path(family))
+        except ValueError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(code=2)
+        ft = load_family_table(Path(family))
+        ped = str(ped_path(Path(family).expanduser().resolve()))
+        proband = proband or ft.proband
+        if not bam:
+            bam = [f"{k}={v}" for k, v in ft.bams.items()]
+    if not bam:
+        console.print("[red]Faltan los BAM (--bam ID=ruta, o columna bam en la tabla)[/red]")
+        raise typer.Exit(code=2)
     bams: dict[str, Path] = {}
     for item in bam:
         sid, sep, path = item.partition("=")
@@ -954,6 +976,10 @@ def run_family(
         console.print(f"[red]El probando {proband} no tiene BAM (--bam {proband}=...)[/red]")
         raise typer.Exit(code=2)
     _apply_family_options(state, ped, relatedness_sites, allow_unverified_relatedness, max_af)
+    if family_rec:
+        state.note(f"pedigrí desde tabla familiar aprobada por {family_rec['approved_by']} "
+                   f"({family_rec['approved_at']}; tabla sha256 {family_rec['table_sha256'][:12]})")
+        state.params["family_approval"] = family_rec
     if state.case.proband not in bams:
         console.print(f"[red]El probando {state.case.proband} no tiene BAM[/red]")
         raise typer.Exit(code=2)
@@ -1010,6 +1036,71 @@ def run_family(
 
 
 # ----------------------------- llm -------------------------------------
+
+family_app = typer.Typer(help="Tabla familiar para clínicos: plantilla, revisión con dibujo y aprobación")
+app.add_typer(family_app, name="family")
+
+
+@family_app.command("template")
+def family_template(
+    out: str = typer.Option("family.tsv", "--out", "-o", help="Fichero de la plantilla (TSV)"),
+    lang: str = typer.Option("en", "--lang", help="en | es"),
+) -> None:
+    """Escribe una tabla familiar de ejemplo para rellenar (se abre en Excel o LibreOffice)."""
+    from publicgenomicagent.tools.family_table import TEMPLATE_EN, TEMPLATE_ES
+    p = Path(out)
+    if p.exists():
+        console.print(f"[red]Ya existe {p}; no lo sobrescribo[/red]")
+        raise typer.Exit(code=2)
+    p.write_text(TEMPLATE_ES if lang == "es" else TEMPLATE_EN, encoding="utf-8")
+    console.print(f"Plantilla escrita: {p}. Rellénela y revísela con: pga family check {p}")
+
+
+@family_app.command("check")
+def family_check(
+    table: str = typer.Argument(..., help="Tabla familiar (TSV/CSV)"),
+    html: str = typer.Option(None, "--html", help="Página de revisión (por defecto <tabla>.check.html)"),
+) -> None:
+    """Interpreta la tabla, dibuja el pedigrí y genera la página de revisión para el clínico."""
+    from publicgenomicagent.tools.family_table import check_page, load_family_table, summary
+    from publicgenomicagent.tools.pedigree_plot import draw_pedigree
+    t = Path(table).expanduser().resolve()
+    try:
+        ft = load_family_table(t)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(code=2)
+    console.print(summary(ft), markup=False, highlight=False)
+    svg = None
+    if ft.ok:
+        try:
+            svg = draw_pedigree(ft, t.with_name(t.stem + ".pedigree.svg")).read_text()
+        except Exception as e:  # noqa: BLE001
+            console.print(f"[yellow]Sin dibujo: {e}[/yellow]")
+    page = Path(html) if html else t.with_name(t.stem + ".check.html")
+    page.write_text(check_page(ft, svg, t.name), encoding="utf-8")
+    if ft.ok:
+        from publicgenomicagent.tools.family_table import record_review
+        record_review(t, drawing=svg is not None)
+    console.print(f"Página de revisión: {page}")
+    if not ft.ok:
+        raise typer.Exit(code=2)
+
+
+@family_app.command("approve")
+def family_approve(
+    table: str = typer.Argument(..., help="Tabla familiar revisada"),
+    by: str = typer.Option(..., "--by", help="Quién aprueba (queda registrado)"),
+) -> None:
+    """Aprueba la tabla: escribe el PED y el registro de aprobación con los hashes."""
+    from publicgenomicagent.tools.family_table import approve
+    try:
+        rec = approve(Path(table), by=by)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(code=2)
+    console.print(f"Aprobada por {rec['approved_by']} ({rec['approved_at']}). PED: {rec['ped']}")
+
 
 llm_app = typer.Typer(help="Cliente LLM local (Ollama / llama.cpp)")
 app.add_typer(llm_app, name="llm")

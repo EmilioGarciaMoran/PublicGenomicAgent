@@ -15,11 +15,18 @@ envs:
   pga-hpo-cpu:
     manifest: envs/pga-hpo-cpu.yml
     description: "pleio-hpo (extracción HPO CPU-only, sin GPU)"
+  pga-r:
+    manifest: envs/pga-r.yml
+    description: "R + Pedixplorer (sucesor de kinship2): dibujo del pedigrí para la confirmación del clínico"
   pga-phenotype:
     manifest: envs/pga-phenotype.yml
     description: "RDMA + transformers para extracción HPO/ORPHA"
 
 tools:
+  rscript:
+    env: pga-r
+    binary: Rscript
+    version_flag: "--version"
   python:
     env: pga-core
     binary: python
